@@ -13,8 +13,8 @@ import { ErrorManager } from './errors/manager.js';
 import { GroupManager } from './groups/manager.js';
 import { registerTools } from './tools/index.js';
 import { getToolsList, callTool } from './tools/registry.js';
-// import { registerResources } from './resources/index.js';
-// import { registerPrompts } from './prompts/index.js';
+import { ResourceProvider } from './resources/provider.js';
+import { PromptProvider } from './prompts/provider.js';
 
 dotenv.config();
 
@@ -88,6 +88,20 @@ async function main() {
     );
 
     registerTools(processManager, statsCollector, healthCheckService, logManager, errorManager, groupManager, logger);
+
+    // Initialize resources and prompts
+    new ResourceProvider(
+      server,
+      processManager,
+      logManager,
+      errorManager,
+      groupManager,
+      statsCollector,
+      healthCheckService,
+      logger
+    );
+
+    new PromptProvider(server, logger);
 
     // Set up tool handlers
     server.setRequestHandler(ToolsListRequest, async () => {
