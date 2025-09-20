@@ -108,6 +108,12 @@ export class DatabaseManager {
       WHERE id = @id
     `));
 
+    this.preparedStatements.set('updateProcessHealth', this.db.prepare(`
+      UPDATE processes
+      SET health_status = @health_status, last_health_check = @last_health_check
+      WHERE id = @id
+    `));
+
     // Log management statements
     this.preparedStatements.set('insertLog', this.db.prepare(`
       INSERT INTO logs (process_id, type, message, timestamp, level)

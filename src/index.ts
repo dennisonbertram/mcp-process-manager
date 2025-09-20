@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { DatabaseManager } from './database/manager.js';
 import { ConfigManager } from './config/manager.js';
 import { ProcessManager } from './process/manager.js';
+import { StatsCollector } from './monitoring/collector.js';
+import { HealthCheckService } from './monitoring/health.js';
 import { registerTools } from './tools/index.js';
 import { getToolsList, callTool } from './tools/registry.js';
 // import { registerResources } from './resources/index.js';
@@ -51,8 +53,12 @@ async function main() {
     // Initialize process manager
     const processManager = new ProcessManager(database, logger, config);
 
-    // Placeholder for ProcessManager - to be implemented in Task 0002
-    // const processManager = new ProcessManager(database, logger, config);
+    // Initialize monitoring services
+    const statsCollector = new StatsCollector(database, processManager, logger);
+    const healthCheckService = new HealthCheckService(processManager, database, logger, config.get('PM_ALLOWED_COMMANDS'));
+
+    // Start stats collection
+    statsCollector.startCollection();
 
     // Create MCP server
     const server = new Server(
@@ -69,7 +75,7 @@ async function main() {
       }
     );
 
-    registerTools(processManager, logger);
+    registerTools(processManager, statsCollector, healthCheckService, logger);
 
     // Set up tool handlers
     server.setRequestHandler(ToolsListRequest, async () => {
@@ -87,6 +93,8 @@ async function main() {
     // Setup cleanup handlers
     const cleanup = () => {
       logger.info('Shutting down Process Manager MCP Server');
+      statsCollector.stopCollection();
+      healthCheckService.stopAllHealthChecks();
       processManager.shutdown();
       database.close();
       process.exit(0);
