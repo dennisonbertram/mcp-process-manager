@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid';
 import winston from 'winston';
 import { DatabaseManager } from '../database/manager.js';
 import { ConfigManager } from '../config/manager.js';
+import { LogManager } from '../logs/manager.js';
 import { ProcessConfig, ProcessInfo, ProcessStatus, HealthStatus, LogType, LogLevel } from '../types/process.js';
 import { EventEmitter } from 'events';
 
@@ -11,14 +12,16 @@ export class ProcessManager extends EventEmitter {
   private database: DatabaseManager;
   private logger: winston.Logger;
   private config: ConfigManager;
+  private logManager: LogManager;
   private healthCheckIntervals: Map<string, NodeJS.Timeout>;
 
-  constructor(database: DatabaseManager, logger: winston.Logger, config: ConfigManager) {
+  constructor(database: DatabaseManager, logger: winston.Logger, config: ConfigManager, logManager: LogManager) {
     super();
     this.processes = new Map();
     this.database = database;
     this.logger = logger;
     this.config = config;
+    this.logManager = logManager;
     this.healthCheckIntervals = new Map();
 
     this.loadExistingProcesses();
@@ -98,7 +101,7 @@ export class ProcessManager extends EventEmitter {
     });
 
     // Create managed process
-    const managedProcess = new ManagedProcess(processInfo, this.database, this.logger);
+    const managedProcess = new ManagedProcess(processInfo, this.database, this.logger, this.logManager);
     this.processes.set(processId, managedProcess);
 
     // Start the actual process
@@ -261,11 +264,13 @@ class ManagedProcess {
   private childProcess?: ChildProcess;
   private database: DatabaseManager;
   private logger: winston.Logger;
+  private logManager: LogManager;
 
-  constructor(info: ProcessInfo, database: DatabaseManager, logger: winston.Logger) {
+  constructor(info: ProcessInfo, database: DatabaseManager, logger: winston.Logger, logManager: LogManager) {
     this.info = info;
     this.database = database;
     this.logger = logger;
+    this.logManager = logManager;
   }
 
   async start(): Promise<void> {
@@ -338,8 +343,8 @@ class ManagedProcess {
   }
 
   private logMessage(type: LogType, message: string, level: LogLevel): void {
-    this.database.getStatement('insertLog').run({
-      process_id: this.info.id,
+    this.logManager.addLog({
+      processId: this.info.id,
       type,
       message,
       timestamp: Date.now(),

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ProcessManager } from '../src/process/manager';
+import { LogManager } from '../src/logs/manager';
 import { DatabaseManager } from '../src/database/manager';
 import { ConfigManager } from '../src/config/manager';
 import winston from 'winston';
@@ -13,7 +14,8 @@ describe('Process Lifecycle Tools', () => {
     const logger = winston.createLogger({ silent: true });
     const config = new ConfigManager();
     db = new DatabaseManager(':memory:', logger);
-    processManager = new ProcessManager(db, logger, config);
+    const logManager = new LogManager(db, logger);
+    processManager = new ProcessManager(db, logger, config, logManager);
   });
 
   afterEach(async () => {

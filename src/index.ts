@@ -8,6 +8,7 @@ import { ConfigManager } from './config/manager.js';
 import { ProcessManager } from './process/manager.js';
 import { StatsCollector } from './monitoring/collector.js';
 import { HealthCheckService } from './monitoring/health.js';
+import { LogManager } from './logs/manager.js';
 import { registerTools } from './tools/index.js';
 import { getToolsList, callTool } from './tools/registry.js';
 // import { registerResources } from './resources/index.js';
@@ -50,8 +51,11 @@ async function main() {
     const dbPath = config.get('PM_DATABASE_PATH');
     const database = new DatabaseManager(dbPath, logger);
 
+    // Initialize log manager
+    const logManager = new LogManager(database, logger);
+
     // Initialize process manager
-    const processManager = new ProcessManager(database, logger, config);
+    const processManager = new ProcessManager(database, logger, config, logManager);
 
     // Initialize monitoring services
     const statsCollector = new StatsCollector(database, processManager, logger);
@@ -75,7 +79,7 @@ async function main() {
       }
     );
 
-    registerTools(processManager, statsCollector, healthCheckService, logger);
+    registerTools(processManager, statsCollector, healthCheckService, logManager, logger);
 
     // Set up tool handlers
     server.setRequestHandler(ToolsListRequest, async () => {
@@ -95,6 +99,7 @@ async function main() {
       logger.info('Shutting down Process Manager MCP Server');
       statsCollector.stopCollection();
       healthCheckService.stopAllHealthChecks();
+      logManager.cleanup();
       processManager.shutdown();
       database.close();
       process.exit(0);

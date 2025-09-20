@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { StatsCollector } from '../src/monitoring/collector';
 import { HealthCheckService } from '../src/monitoring/health';
+import { LogManager } from '../src/logs/manager';
 import { ProcessManager } from '../src/process/manager';
 import { DatabaseManager } from '../src/database/manager';
 import { ConfigManager } from '../src/config/manager';
@@ -20,7 +21,8 @@ describe('Monitoring Tools', () => {
     // Mock the command validation for testing
     config.isCommandAllowed = vi.fn().mockReturnValue(true);
     db = new DatabaseManager(':memory:', logger);
-    processManager = new ProcessManager(db, logger, config);
+    const logManager = new LogManager(db, logger);
+    processManager = new ProcessManager(db, logger, config, logManager);
     statsCollector = new StatsCollector(db, processManager, logger);
     healthService = new HealthCheckService(processManager, db, logger, config.get('PM_ALLOWED_COMMANDS'));
   });
