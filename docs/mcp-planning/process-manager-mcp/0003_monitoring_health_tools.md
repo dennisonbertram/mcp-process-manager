@@ -1,0 +1,848 @@
+# Process Monitoring and Health Check Tools
+
+## Overview
+Implementation of process monitoring tools including real-time stats collection, health checks, and system resource monitoring using pidusage and node-os-utils libraries.
+
+## Monitoring Service Implementation
+
+### Stats Collector Service
+```typescript
+// src/monitoring/collector.ts
+import pidusage from 'pidusage';
+import osUtils from 'node-os-utils';
+import winston from 'winston';
+import { DatabaseManager } from '../database/manager.js';
+import { ProcessManager } from '../process/manager.js';
+import { ProcessMetrics } from '../types/process.js';
+import { EventEmitter } from 'events';
+
+export interface SystemStats {
+  cpuUsage: number;      // Percentage 0-100
+  memoryUsage: number;   // Percentage 0-100
+  memoryFree: number;    // Bytes
+  memoryTotal: number;   // Bytes
+  loadAverage: number[]; // 1, 5, 15 minute averages
+  uptime: number;        // Seconds
+}
+
+export class StatsCollector extends EventEmitter {
+  private database: DatabaseManager;
+  private processManager: ProcessManager;
+  private logger: winston.Logger;
+  private collectionInterval?: NodeJS.Timeout;
+  private metricsCache: Map<string, ProcessMetrics[]>;
+  private systemStatsCache?: SystemStats;
+
+  constructor(
+    database: DatabaseManager,
+    processManager: ProcessManager,
+    logger: winston.Logger
+  ) {
+    super();
+    this.database = database;
+    this.processManager = processManager;
+    this.logger = logger;
+    this.metricsCache = new Map();
+  }
+
+  startCollection(intervalMs: number = 10000): void {
+    if (this.collectionInterval) {
+      this.stopCollection();
+    }
+
+    this.collectionInterval = setInterval(async () => {
+      try {
+        await this.collectAllMetrics();
+      } catch (error) {
+        this.logger.error('Failed to collect metrics:', error);
+      }
+    }, intervalMs);
+
+    // Collect immediately
+    this.collectAllMetrics();
+  }
+
+  stopCollection(): void {
+    if (this.collectionInterval) {
+      clearInterval(this.collectionInterval);
+      this.collectionInterval = undefined;
+    }
+  }
+
+  private async collectAllMetrics(): Promise<void> {
+    // Collect system stats
+    this.systemStatsCache = await this.collectSystemStats();
+
+    // Collect process stats
+    const processes = this.processManager.listProcesses({
+      status: ProcessStatus.RUNNING
+    });
+
+    const metricsPromises = processes.map(async (process) => {
+      if (process.pid) {
+        try {
+          const metrics = await this.collectProcessMetrics(process.id, process.pid);
+          this.storeMetrics(metrics);
+          this.updateCache(process.id, metrics);
+          return metrics;
+        } catch (error) {
+          this.logger.debug(`Failed to collect metrics for process ${process.id}:`, error);
+          return null;
+        }
+      }
+      return null;
+    });
+
+    await Promise.all(metricsPromises);
+    this.emit('metricsCollected', { system: this.systemStatsCache, processes: this.metricsCache });
+  }
+
+  private async collectProcessMetrics(processId: string, pid: number): Promise<ProcessMetrics> {
+    const stats = await pidusage(pid);
+
+    return {
+      processId,
+      cpuUsage: stats.cpu,         // CPU usage percentage
+      memoryUsage: stats.memory,   // Memory usage in bytes
+      timestamp: Date.now()
+    };
+  }
+
+  private async collectSystemStats(): Promise<SystemStats> {
+    const cpu = osUtils.cpu;
+    const mem = osUtils.mem;
+    const os = osUtils.os;
+
+    const [cpuUsage, memInfo] = await Promise.all([
+      cpu.usage(),
+      mem.info()
+    ]);
+
+    return {
+      cpuUsage,
+      memoryUsage: 100 - memInfo.freeMemPercentage,
+      memoryFree: memInfo.freeMemMb * 1024 * 1024,  // Convert to bytes
+      memoryTotal: memInfo.totalMemMb * 1024 * 1024,
+      loadAverage: osUtils.loadavg ? osUtils.loadavg(1) : [0, 0, 0],
+      uptime: os.uptime()
+    };
+  }
+
+  private storeMetrics(metrics: ProcessMetrics): void {
+    this.database.getStatement('insertMetric').run({
+      process_id: metrics.processId,
+      cpu_usage: metrics.cpuUsage,
+      memory_usage: metrics.memoryUsage,
+      timestamp: metrics.timestamp
+    });
+  }
+
+  private updateCache(processId: string, metrics: ProcessMetrics): void {
+    if (!this.metricsCache.has(processId)) {
+      this.metricsCache.set(processId, []);
+    }
+
+    const cache = this.metricsCache.get(processId)!;
+    cache.push(metrics);
+
+    // Keep only last 100 entries in cache
+    if (cache.length > 100) {
+      cache.shift();
+    }
+  }
+
+  async getProcessStats(processId: string, duration?: number): Promise<ProcessMetrics[]> {
+    const cutoff = duration ? Date.now() - duration : 0;
+
+    // Try cache first
+    if (this.metricsCache.has(processId)) {
+      const cached = this.metricsCache.get(processId)!;
+      return cached.filter(m => m.timestamp >= cutoff);
+    }
+
+    // Query database
+    const query = duration
+      ? this.database.getDb().prepare(`
+          SELECT * FROM metrics
+          WHERE process_id = ? AND timestamp >= ?
+          ORDER BY timestamp DESC
+          LIMIT 1000
+        `)
+      : this.database.getDb().prepare(`
+          SELECT * FROM metrics
+          WHERE process_id = ?
+          ORDER BY timestamp DESC
+          LIMIT 100
+        `);
+
+    const results = duration
+      ? query.all(processId, cutoff)
+      : query.all(processId);
+
+    return results.map(row => ({
+      processId: row.process_id,
+      cpuUsage: row.cpu_usage,
+      memoryUsage: row.memory_usage,
+      timestamp: row.timestamp
+    }));
+  }
+
+  async getSystemStats(): Promise<SystemStats> {
+    if (this.systemStatsCache) {
+      return this.systemStatsCache;
+    }
+
+    return this.collectSystemStats();
+  }
+
+  async getAggregatedStats(processId: string, duration: number): Promise<{
+    avgCpu: number;
+    maxCpu: number;
+    avgMemory: number;
+    maxMemory: number;
+    sampleCount: number;
+  }> {
+    const stats = await this.getProcessStats(processId, duration);
+
+    if (stats.length === 0) {
+      return {
+        avgCpu: 0,
+        maxCpu: 0,
+        avgMemory: 0,
+        maxMemory: 0,
+        sampleCount: 0
+      };
+    }
+
+    const cpuValues = stats.map(s => s.cpuUsage);
+    const memValues = stats.map(s => s.memoryUsage);
+
+    return {
+      avgCpu: cpuValues.reduce((a, b) => a + b, 0) / cpuValues.length,
+      maxCpu: Math.max(...cpuValues),
+      avgMemory: memValues.reduce((a, b) => a + b, 0) / memValues.length,
+      maxMemory: Math.max(...memValues),
+      sampleCount: stats.length
+    };
+  }
+}
+```
+
+### Health Check Service
+```typescript
+// src/monitoring/health.ts
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import winston from 'winston';
+import { ProcessManager } from '../process/manager.js';
+import { DatabaseManager } from '../database/manager.js';
+import { HealthStatus } from '../types/process.js';
+
+const execAsync = promisify(exec);
+
+export interface HealthCheckResult {
+  processId: string;
+  status: HealthStatus;
+  message?: string;
+  responseTime?: number;
+  checkedAt: number;
+}
+
+export class HealthCheckService {
+  private processManager: ProcessManager;
+  private database: DatabaseManager;
+  private logger: winston.Logger;
+  private activeChecks: Map<string, NodeJS.Timeout>;
+
+  constructor(
+    processManager: ProcessManager,
+    database: DatabaseManager,
+    logger: winston.Logger
+  ) {
+    this.processManager = processManager;
+    this.database = database;
+    this.logger = logger;
+    this.activeChecks = new Map();
+  }
+
+  async checkProcessHealth(processId: string): Promise<HealthCheckResult> {
+    const processes = this.processManager.listProcesses();
+    const process = processes.find(p => p.id === processId);
+
+    if (!process) {
+      return {
+        processId,
+        status: HealthStatus.UNKNOWN,
+        message: 'Process not found',
+        checkedAt: Date.now()
+      };
+    }
+
+    // Check if process is running
+    if (process.status !== ProcessStatus.RUNNING) {
+      return {
+        processId,
+        status: HealthStatus.UNHEALTHY,
+        message: `Process status: ${process.status}`,
+        checkedAt: Date.now()
+      };
+    }
+
+    // If no health check command, just check if PID exists
+    if (!process.healthCheckCommand) {
+      const isAlive = await this.isPidAlive(process.pid!);
+      return {
+        processId,
+        status: isAlive ? HealthStatus.HEALTHY : HealthStatus.UNHEALTHY,
+        message: isAlive ? 'Process is running' : 'Process not found',
+        checkedAt: Date.now()
+      };
+    }
+
+    // Execute health check command
+    const startTime = Date.now();
+    try {
+      const { stdout, stderr } = await execAsync(process.healthCheckCommand, {
+        timeout: 5000,
+        env: process.env
+      });
+
+      const responseTime = Date.now() - startTime;
+
+      // Update database
+      this.database.getDb().prepare(`
+        UPDATE processes
+        SET health_status = ?, last_health_check = ?
+        WHERE id = ?
+      `).run(HealthStatus.HEALTHY, Date.now(), processId);
+
+      return {
+        processId,
+        status: HealthStatus.HEALTHY,
+        message: stdout.trim() || 'Health check passed',
+        responseTime,
+        checkedAt: Date.now()
+      };
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+
+      // Update database
+      this.database.getDb().prepare(`
+        UPDATE processes
+        SET health_status = ?, last_health_check = ?
+        WHERE id = ?
+      `).run(HealthStatus.UNHEALTHY, Date.now(), processId);
+
+      return {
+        processId,
+        status: HealthStatus.UNHEALTHY,
+        message: error.message,
+        responseTime,
+        checkedAt: Date.now()
+      };
+    }
+  }
+
+  async checkAllHealth(): Promise<HealthCheckResult[]> {
+    const processes = this.processManager.listProcesses({
+      status: ProcessStatus.RUNNING
+    });
+
+    const results = await Promise.all(
+      processes.map(p => this.checkProcessHealth(p.id))
+    );
+
+    return results;
+  }
+
+  startAutoHealthChecks(processId: string, intervalMs: number): void {
+    // Stop existing check if any
+    this.stopAutoHealthChecks(processId);
+
+    const interval = setInterval(async () => {
+      try {
+        const result = await this.checkProcessHealth(processId);
+
+        if (result.status === HealthStatus.UNHEALTHY) {
+          this.logger.warn(`Process ${processId} is unhealthy: ${result.message}`);
+
+          // Check if auto-restart is enabled
+          const processes = this.processManager.listProcesses();
+          const process = processes.find(p => p.id === processId);
+
+          if (process?.autoRestart) {
+            this.logger.info(`Auto-restarting unhealthy process ${processId}`);
+            await this.processManager.restartProcess(processId);
+          }
+        }
+      } catch (error) {
+        this.logger.error(`Health check failed for ${processId}:`, error);
+      }
+    }, intervalMs);
+
+    this.activeChecks.set(processId, interval);
+  }
+
+  stopAutoHealthChecks(processId: string): void {
+    const interval = this.activeChecks.get(processId);
+    if (interval) {
+      clearInterval(interval);
+      this.activeChecks.delete(processId);
+    }
+  }
+
+  stopAllHealthChecks(): void {
+    for (const interval of this.activeChecks.values()) {
+      clearInterval(interval);
+    }
+    this.activeChecks.clear();
+  }
+
+  private async isPidAlive(pid: number): Promise<boolean> {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+```
+
+## Tool Implementations
+
+### Monitoring Tools Registration
+```typescript
+// src/tools/monitoring.ts
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { z } from 'zod';
+import { ProcessManager } from '../process/manager.js';
+import { StatsCollector } from '../monitoring/collector.js';
+import { HealthCheckService } from '../monitoring/health.js';
+import winston from 'winston';
+
+// Schema definitions
+const GetProcessInfoSchema = z.object({
+  processId: z.string().min(1)
+});
+
+const GetProcessStatsSchema = z.object({
+  processId: z.string().min(1),
+  duration: z.number().min(0).optional() // milliseconds
+});
+
+const CheckProcessHealthSchema = z.object({
+  processId: z.string().min(1)
+});
+
+const GetSystemStatsSchema = z.object({});
+
+export function registerMonitoringTools(
+  server: Server,
+  processManager: ProcessManager,
+  statsCollector: StatsCollector,
+  healthCheckService: HealthCheckService,
+  logger: winston.Logger
+): void {
+  // Tool: get_process_info
+  server.setRequestHandler({
+    method: 'tools/call',
+    handler: async (request) => {
+      if (request.params.name === 'get_process_info') {
+        try {
+          const args = GetProcessInfoSchema.parse(request.params.arguments);
+          const processes = processManager.listProcesses();
+          const process = processes.find(p => p.id === args.processId);
+
+          if (!process) {
+            throw new Error(`Process ${args.processId} not found`);
+          }
+
+          // Get latest metrics
+          const metrics = await statsCollector.getProcessStats(args.processId, 60000);
+          const latestMetric = metrics[0];
+
+          const info = {
+            ...process,
+            currentCpu: latestMetric?.cpuUsage || 0,
+            currentMemory: latestMetric?.memoryUsage || 0,
+            uptime: process.startedAt ? Date.now() - process.startedAt : 0
+          };
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Process ${process.name} (${process.id})\nStatus: ${process.status}\nPID: ${process.pid || 'N/A'}\nCPU: ${info.currentCpu.toFixed(2)}%\nMemory: ${(info.currentMemory / 1024 / 1024).toFixed(2)} MB`
+              }
+            ],
+            data: info
+          };
+        } catch (error) {
+          logger.error('Failed to get process info:', error);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to get process info: ${error.message}`
+              }
+            ],
+            isError: true
+          };
+        }
+      }
+
+      // Tool: get_process_stats
+      if (request.params.name === 'get_process_stats') {
+        try {
+          const args = GetProcessStatsSchema.parse(request.params.arguments);
+          const stats = await statsCollector.getProcessStats(
+            args.processId,
+            args.duration
+          );
+
+          const aggregated = await statsCollector.getAggregatedStats(
+            args.processId,
+            args.duration || 3600000 // Default 1 hour
+          );
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Process stats for ${args.processId}:\nAvg CPU: ${aggregated.avgCpu.toFixed(2)}%\nMax CPU: ${aggregated.maxCpu.toFixed(2)}%\nAvg Memory: ${(aggregated.avgMemory / 1024 / 1024).toFixed(2)} MB\nMax Memory: ${(aggregated.maxMemory / 1024 / 1024).toFixed(2)} MB\nSamples: ${aggregated.sampleCount}`
+              }
+            ],
+            data: { stats, aggregated }
+          };
+        } catch (error) {
+          logger.error('Failed to get process stats:', error);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to get process stats: ${error.message}`
+              }
+            ],
+            isError: true
+          };
+        }
+      }
+
+      // Tool: check_process_health
+      if (request.params.name === 'check_process_health') {
+        try {
+          const args = CheckProcessHealthSchema.parse(request.params.arguments);
+          const result = await healthCheckService.checkProcessHealth(args.processId);
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Health check for ${args.processId}: ${result.status}\n${result.message || ''}\nResponse time: ${result.responseTime || 'N/A'}ms`
+              }
+            ],
+            data: result
+          };
+        } catch (error) {
+          logger.error('Failed to check process health:', error);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to check process health: ${error.message}`
+              }
+            ],
+            isError: true
+          };
+        }
+      }
+
+      // Tool: get_system_stats
+      if (request.params.name === 'get_system_stats') {
+        try {
+          const stats = await statsCollector.getSystemStats();
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `System Stats:\nCPU: ${stats.cpuUsage.toFixed(2)}%\nMemory: ${stats.memoryUsage.toFixed(2)}%\nFree Memory: ${(stats.memoryFree / 1024 / 1024 / 1024).toFixed(2)} GB\nTotal Memory: ${(stats.memoryTotal / 1024 / 1024 / 1024).toFixed(2)} GB\nUptime: ${(stats.uptime / 3600).toFixed(2)} hours`
+              }
+            ],
+            data: stats
+          };
+        } catch (error) {
+          logger.error('Failed to get system stats:', error);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to get system stats: ${error.message}`
+              }
+            ],
+            isError: true
+          };
+        }
+      }
+    }
+  });
+
+  // Register tool definitions
+  server.setRequestHandler({
+    method: 'tools/list',
+    handler: async () => {
+      return {
+        tools: [
+          {
+            name: 'get_process_info',
+            description: 'Get detailed information about a specific process',
+            inputSchema: GetProcessInfoSchema
+          },
+          {
+            name: 'get_process_stats',
+            description: 'Get CPU and memory statistics for a process',
+            inputSchema: GetProcessStatsSchema
+          },
+          {
+            name: 'check_process_health',
+            description: 'Run health check for a process',
+            inputSchema: CheckProcessHealthSchema
+          },
+          {
+            name: 'get_system_stats',
+            description: 'Get overall system resource usage',
+            inputSchema: GetSystemStatsSchema
+          }
+        ]
+      };
+    }
+  });
+}
+```
+
+## Testing Strategy
+
+### Phase 1: Library Testing
+```bash
+# Test pidusage
+npm install pidusage
+node -e "
+  const pidusage = require('pidusage');
+  pidusage(process.pid).then(stats => {
+    console.log('CPU:', stats.cpu + '%');
+    console.log('Memory:', (stats.memory / 1024 / 1024).toFixed(2) + ' MB');
+  });
+"
+
+# Test node-os-utils
+npm install node-os-utils
+node -e "
+  const osu = require('node-os-utils');
+  const cpu = osu.cpu;
+  const mem = osu.mem;
+
+  Promise.all([cpu.usage(), mem.info()]).then(([cpuUsage, memInfo]) => {
+    console.log('CPU Usage:', cpuUsage + '%');
+    console.log('Memory Free:', memInfo.freeMemPercentage + '%');
+  });
+"
+```
+
+### Phase 2: MCP Tool Testing
+```bash
+# Get process info
+echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_process_info","arguments":{"processId":"PROCESS_ID"}},"id":1}' | node dist/index.js
+
+# Get process stats
+echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_process_stats","arguments":{"processId":"PROCESS_ID","duration":60000}},"id":2}' | node dist/index.js
+
+# Check health
+echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"check_process_health","arguments":{"processId":"PROCESS_ID"}},"id":3}' | node dist/index.js
+
+# Get system stats
+echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_system_stats","arguments":{}},"id":4}' | node dist/index.js
+```
+
+### Phase 3: Integration Testing
+```typescript
+// tests/monitoring.test.ts
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { StatsCollector } from '../src/monitoring/collector';
+import { HealthCheckService } from '../src/monitoring/health';
+import { ProcessManager } from '../src/process/manager';
+import { DatabaseManager } from '../src/database/manager';
+import { ConfigManager } from '../src/config/manager';
+import winston from 'winston';
+
+describe('Monitoring Tools', () => {
+  let statsCollector: StatsCollector;
+  let healthService: HealthCheckService;
+  let processManager: ProcessManager;
+  let db: DatabaseManager;
+
+  beforeEach(() => {
+    const logger = winston.createLogger({ silent: true });
+    const config = new ConfigManager();
+    db = new DatabaseManager(':memory:', logger);
+    processManager = new ProcessManager(db, logger, config);
+    statsCollector = new StatsCollector(db, processManager, logger);
+    healthService = new HealthCheckService(processManager, db, logger);
+  });
+
+  afterEach(() => {
+    statsCollector.stopCollection();
+    healthService.stopAllHealthChecks();
+    processManager.shutdown();
+    db.close();
+  });
+
+  it('should collect process metrics', async () => {
+    const info = await processManager.startProcess({
+      name: 'test',
+      command: 'node',
+      args: ['-e', 'setInterval(() => {}, 1000)']
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    const stats = await statsCollector.getProcessStats(info.id);
+    expect(stats).toBeDefined();
+    expect(stats[0]?.cpuUsage).toBeGreaterThanOrEqual(0);
+    expect(stats[0]?.memoryUsage).toBeGreaterThan(0);
+  });
+
+  it('should collect system stats', async () => {
+    const stats = await statsCollector.getSystemStats();
+
+    expect(stats.cpuUsage).toBeGreaterThanOrEqual(0);
+    expect(stats.cpuUsage).toBeLessThanOrEqual(100);
+    expect(stats.memoryTotal).toBeGreaterThan(0);
+    expect(stats.uptime).toBeGreaterThan(0);
+  });
+
+  it('should perform health checks', async () => {
+    const info = await processManager.startProcess({
+      name: 'test',
+      command: 'node',
+      args: ['-e', 'console.log("healthy")'],
+      healthCheckCommand: 'echo "OK"'
+    });
+
+    const result = await healthService.checkProcessHealth(info.id);
+
+    expect(result.processId).toBe(info.id);
+    expect(result.status).toBeDefined();
+    expect(result.checkedAt).toBeDefined();
+  });
+});
+```
+
+## Success Criteria
+
+### Implementation Checklist
+- [ ] StatsCollector collects process metrics via pidusage
+- [ ] System stats collected via node-os-utils
+- [ ] Metrics stored in SQLite database
+- [ ] Metrics cache maintains last 100 entries
+- [ ] Health checks execute custom commands
+- [ ] Auto-restart triggers on health failure
+- [ ] All 4 monitoring tools implemented
+- [ ] Aggregated stats calculated correctly
+- [ ] PID existence checks work
+- [ ] Response time tracked for health checks
+
+### Performance Metrics
+- [ ] Metric collection < 50ms per process
+- [ ] System stats collection < 100ms
+- [ ] Health check execution < 5s timeout
+- [ ] Stats query < 10ms for 1000 records
+- [ ] Memory overhead < 10MB for 50 processes
+
+## Dependencies
+- Requires Task 0001 (Server Setup) to be complete
+- Requires Task 0002 (Process Lifecycle) to be complete
+- ProcessManager must be managing active processes
+- Database must be initialized with metrics table
+
+## Next Steps
+After implementing monitoring tools:
+1. Add log management tools (Task 0004)
+2. Implement error tracking tools (Task 0005)
+3. Create process group management (Task 0006)
+---
+## Update Notes (2025-09-20)
+
+- Shell-free health checks
+  - Replace `exec` with `execFile` or `spawn` `{ shell: false }`. Validate health command path using the same allowlist and realpath boundary check as process commands. Set a 5s timeout and cap output bytes to prevent memory issues.
+- Tools registry
+  - Register monitoring tools via the central registry (see 0002 update notes). Avoid defining multiple `tools/list` handlers.
+- MCP compliance
+  - `tools/call` returns `content` only; embed JSON summaries in text or use a JSON content block if supported by the SDK.
+- TDD additions
+  - Tests: dead PID handling in pidusage; health failures trigger optional auto‑restart with backoff; validate metrics cache caps; validate JSON Schema in `tools/list` using ajv.
+
+### Revised Monitoring Tools Example
+```typescript
+// src/tools/monitoring.ts
+import { z } from 'zod';
+import type winston from 'winston';
+import { ProcessManager } from '../process/manager.js';
+import { StatsCollector } from '../monitoring/collector.js';
+import { HealthCheckService } from '../monitoring/health.js';
+import { registerTool } from './registry.js';
+
+const GetProcessInfoSchema = z.object({ processId: z.string().min(1) });
+const GetProcessStatsSchema = z.object({ processId: z.string().min(1), duration: z.number().min(0).optional() });
+const CheckProcessHealthSchema = z.object({ processId: z.string().min(1) });
+const GetSystemStatsSchema = z.object({});
+
+export function registerMonitoringTools(
+  pm: ProcessManager,
+  stats: StatsCollector,
+  health: HealthCheckService,
+  logger: winston.Logger
+) {
+  registerTool({
+    name: 'get_process_info',
+    description: 'Get detailed information about a specific process',
+    schema: GetProcessInfoSchema,
+    handler: async ({ processId }: any) => {
+      const p = pm.listProcesses().find((x) => x.id === processId);
+      if (!p) throw new Error(`Process ${processId} not found`);
+      const m = (await stats.getProcessStats(processId, 60000))[0];
+      return [{ type: 'text', text: `Process ${p.name} (${p.id}) Status: ${p.status} CPU: ${(m?.cpuUsage||0).toFixed(2)}% Mem: ${(((m?.memoryUsage||0)/1048576)).toFixed(2)} MB` }];
+    },
+  });
+
+  registerTool({
+    name: 'get_process_stats',
+    description: 'Get CPU and memory statistics for a process',
+    schema: GetProcessStatsSchema,
+    handler: async ({ processId, duration }: any) => {
+      const aggregated = await stats.getAggregatedStats(processId, duration || 3600000);
+      return [{ type: 'text', text: `Stats ${processId} AvgCPU ${aggregated.avgCpu.toFixed(2)}% MaxCPU ${aggregated.maxCpu.toFixed(2)}% AvgMem ${(aggregated.avgMemory/1048576).toFixed(2)} MB` }];
+    },
+  });
+
+  registerTool({
+    name: 'check_process_health',
+    description: 'Run health check for a process',
+    schema: CheckProcessHealthSchema,
+    handler: async ({ processId }: any) => {
+      const r = await health.checkProcessHealth(processId);
+      return [{ type: 'text', text: `Health ${processId}: ${r.status} ${r.message||''}` }];
+    },
+  });
+
+  registerTool({
+    name: 'get_system_stats',
+    description: 'Get overall system resource usage',
+    schema: GetSystemStatsSchema,
+    handler: async () => {
+      const s = await stats.getSystemStats();
+      return [{ type: 'text', text: `System CPU ${s.cpuUsage.toFixed(2)}% Mem ${s.memoryUsage.toFixed(2)}% Uptime ${(s.uptime/3600).toFixed(2)}h` }];
+    },
+  });
+}
+```

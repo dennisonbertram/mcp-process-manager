@@ -1,0 +1,303 @@
+# Process Manager MCP Server Overview
+
+## Purpose
+A comprehensive MCP server that enables LLMs to manage system processes, monitor their health, collect logs, and handle errors through a production-ready interface with persistent storage and real-time monitoring capabilities.
+
+## Core Architecture
+
+### Technology Stack
+- **Runtime**: Node.js 18+ with TypeScript
+- **MCP SDK**: @modelcontextprotocol/sdk (latest)
+- **Database**: better-sqlite3 for high-performance log storage
+- **Process Management**: Node.js child_process (spawn for streaming, exec for commands)
+- **System Monitoring**: pidusage for per-process metrics, node-os-utils for system metrics
+- **Validation**: zod for schema validation
+- **Logging**: winston for structured logging
+- **Testing**: vitest for unit/integration tests
+
+### Key Design Decisions
+1. **Synchronous SQLite**: Using better-sqlite3 for maximum write performance (2000+ queries/sec)
+2. **Process Isolation**: Each managed process runs in isolated child process with resource limits
+3. **Stream-based Logging**: Using spawn() for real-time stdout/stderr streaming
+4. **WAL Mode**: SQLite Write-Ahead Logging for concurrent read/write operations
+5. **Health Check System**: Configurable health checks with auto-restart capabilities
+6. **Process Groups**: Logical grouping for managing related processes together
+
+## MCP Architecture
+
+### Server Capabilities
+- ✅ Tools: 20 tools across 5 categories
+- ✅ Resources: 6 dynamic resources for process state
+- ✅ Prompts: 4 interactive templates for common workflows
+- ✅ Logging: Structured logging with SQLite persistence
+- ✅ Monitoring: Real-time CPU/memory tracking
+
+### Environment Configuration
+```bash
+# Required environment variables (.env file)
+PM_DATABASE_PATH=/path/to/process-logs.db
+PM_LOG_RETENTION_DAYS=30
+PM_MAX_PROCESSES=50
+PM_HEALTH_CHECK_INTERVAL=60000
+PM_AUTO_RESTART_ENABLED=true
+PM_LOG_LEVEL=info
+PM_ALLOWED_COMMANDS=/usr/bin,/usr/local/bin,/opt
+PM_MAX_LOG_SIZE_MB=100
+DEBUG=false
+```
+
+### Security Model
+- **Command Validation**: Whitelist of allowed executable paths
+- **Resource Limits**: CPU/memory limits per process
+- **Input Sanitization**: All user inputs validated with zod schemas
+- **Process Isolation**: No shell execution unless explicitly required
+- **Log Rotation**: Automatic cleanup of old logs
+- **Rate Limiting**: Protection against resource exhaustion
+
+## Database Schema
+
+### Tables Structure
+```sql
+-- Managed processes registry
+CREATE TABLE processes (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  command TEXT NOT NULL,
+  args TEXT, -- JSON array
+  env TEXT, -- JSON object
+  cwd TEXT,
+  pid INTEGER,
+  status TEXT CHECK(status IN ('starting', 'running', 'stopped', 'failed', 'crashed')),
+  group_id TEXT,
+  created_at INTEGER NOT NULL,
+  started_at INTEGER,
+  stopped_at INTEGER,
+  restart_count INTEGER DEFAULT 0,
+  auto_restart BOOLEAN DEFAULT FALSE,
+  health_check_command TEXT,
+  health_check_interval INTEGER,
+  last_health_check INTEGER,
+  health_status TEXT CHECK(health_status IN ('healthy', 'unhealthy', 'unknown'))
+);
+
+-- Process logs with timestamps
+CREATE TABLE logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  process_id TEXT NOT NULL,
+  type TEXT CHECK(type IN ('stdout', 'stderr', 'system')),
+  message TEXT NOT NULL,
+  timestamp INTEGER NOT NULL,
+  level TEXT CHECK(level IN ('debug', 'info', 'warn', 'error')),
+  FOREIGN KEY (process_id) REFERENCES processes(id)
+);
+
+-- Error tracking for analysis
+CREATE TABLE errors (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  process_id TEXT NOT NULL,
+  error_type TEXT NOT NULL,
+  message TEXT NOT NULL,
+  stack_trace TEXT,
+  timestamp INTEGER NOT NULL,
+  resolved BOOLEAN DEFAULT FALSE,
+  FOREIGN KEY (process_id) REFERENCES processes(id)
+);
+
+-- Process groups for orchestration
+CREATE TABLE process_groups (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  created_at INTEGER NOT NULL,
+  startup_order TEXT -- JSON array of process IDs
+);
+
+-- Performance metrics
+CREATE TABLE metrics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  process_id TEXT NOT NULL,
+  cpu_usage REAL,
+  memory_usage INTEGER, -- in bytes
+  timestamp INTEGER NOT NULL,
+  FOREIGN KEY (process_id) REFERENCES processes(id)
+);
+
+-- Indexes for performance
+CREATE INDEX idx_logs_process_timestamp ON logs(process_id, timestamp DESC);
+CREATE INDEX idx_errors_process_timestamp ON errors(process_id, timestamp DESC);
+CREATE INDEX idx_metrics_process_timestamp ON metrics(process_id, timestamp DESC);
+CREATE INDEX idx_processes_group ON processes(group_id);
+CREATE INDEX idx_processes_status ON processes(status);
+```
+
+## Tool Categories
+
+### 1. Process Lifecycle Management (5 tools)
+- `start_process` - Launch new managed process
+- `stop_process` - Gracefully stop a process
+- `restart_process` - Stop and restart with optional new config
+- `kill_process` - Force kill a process
+- `list_processes` - List all managed processes
+
+### 2. Process Monitoring (4 tools)
+- `get_process_info` - Detailed info about a specific process
+- `get_process_stats` - CPU/memory usage statistics
+- `check_process_health` - Run health check command
+- `get_system_stats` - Overall system resource usage
+
+### 3. Log Management (4 tools)
+- `get_logs` - Retrieve historical logs with filters
+- `tail_logs` - Stream recent logs in real-time
+- `search_logs` - Full-text search across logs
+- `clear_logs` - Remove old logs for a process
+
+### 4. Error Handling (3 tools)
+- `get_errors` - Retrieve error history
+- `get_latest_errors` - Get recent errors across all processes
+- `mark_error_resolved` - Mark an error as resolved
+
+### 5. Process Groups (4 tools)
+- `create_group` - Create a new process group
+- `add_to_group` - Add process to a group
+- `start_group` - Start all processes in a group
+- `stop_group` - Stop all processes in a group
+
+## Resource Definitions
+
+### 1. processes://list
+Real-time list of all managed processes with current status
+
+### 2. logs://recent
+Recent logs across all processes (last 100 entries)
+
+### 3. errors://latest
+Latest unresolved errors from all processes
+
+### 4. groups://list
+Process groups and their member status
+
+### 5. health://status
+Current health check status for all monitored processes
+
+### 6. metrics://summary
+System resource usage summary for last hour
+
+## Prompt Templates
+
+### 1. debug_process
+Interactive debugging assistant for failing processes
+
+### 2. optimize_performance
+Analyze process metrics and suggest optimizations
+
+### 3. setup_monitoring
+Configure comprehensive monitoring for a new process
+
+### 4. troubleshoot_group
+Diagnose issues with process group coordination
+
+## Development Approach
+
+### 3-Phase Testing Strategy
+
+#### Phase 1: Process Management Testing
+```bash
+# Test process spawning
+node -e "const cp = require('child_process'); const p = cp.spawn('ls', ['-la']); p.stdout.on('data', d => console.log(d.toString()));"
+
+# Test process monitoring
+npm install pidusage
+node -e "const pidusage = require('pidusage'); pidusage(process.pid).then(console.log);"
+
+# Test SQLite operations
+npm install better-sqlite3
+node -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); console.log(db.prepare('SELECT 1').get());"
+```
+
+#### Phase 2: MCP Tool Testing
+```bash
+# Test via stdio
+echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"start_process","arguments":{"name":"test","command":"node","args":["-e","console.log(\"Hello\")"]}},"id":1}' | node dist/index.js
+```
+
+#### Phase 3: Integration Testing
+```bash
+# Full integration test with real processes
+npm test
+```
+
+### Performance Targets
+- Process startup: < 100ms
+- Log write: < 5ms per entry
+- Query response: < 50ms for 10,000 logs
+- Health check: < 500ms per process
+- Memory usage: < 100MB for managing 50 processes
+
+## Task Overview
+
+### Implementation Tasks
+- [ ] 0001_server_setup_config.md - Core server foundation with TypeScript and SQLite
+- [ ] 0002_process_lifecycle_tools.md - Process start/stop/restart/kill tools
+- [ ] 0003_monitoring_health_tools.md - Process monitoring and health checks
+- [ ] 0004_log_management_tools.md - Log collection, storage, and querying
+- [ ] 0005_error_tracking_tools.md - Error capture and analysis tools
+- [ ] 0006_process_groups_tools.md - Group management and orchestration
+- [ ] 0007_resources_prompts.md - Dynamic resources and prompt templates
+- [ ] 0008_testing_deployment.md - Comprehensive testing and deployment strategy
+- [ ] 0009_readme_documentation.md - User documentation and examples
+
+### Security & Production Tasks
+- [ ] 0010_security_hardening.md - Command validation, resource limits, sandboxing
+- [ ] 0011_performance_optimization.md - Database optimization, caching, connection pooling
+
+## Success Criteria
+
+### Functional Requirements
+- ✅ Start/stop processes with full control over environment
+- ✅ Real-time log streaming and persistent storage
+- ✅ Automatic health checking with configurable intervals
+- ✅ Process group orchestration with dependency management
+- ✅ Comprehensive error tracking and analysis
+- ✅ Resource usage monitoring per process
+
+### Non-Functional Requirements
+- ✅ Handle 50+ concurrent processes
+- ✅ Store 1M+ log entries efficiently
+- ✅ Query logs in < 100ms
+- ✅ Graceful shutdown handling
+- ✅ Automatic recovery from crashes
+- ✅ Security isolation between processes
+
+## Dependencies Between Tasks
+
+```mermaid
+graph TD
+    A[0001 Server Setup] --> B[0002 Process Lifecycle]
+    A --> C[0003 Monitoring]
+    B --> D[0004 Log Management]
+    B --> E[0005 Error Tracking]
+    B --> F[0006 Process Groups]
+    C --> D
+    D --> G[0007 Resources/Prompts]
+    E --> G
+    F --> G
+    G --> H[0008 Testing]
+    H --> I[0009 Documentation]
+    A --> J[0010 Security]
+    D --> K[0011 Performance]
+```
+
+## Risk Mitigation
+
+### Technical Risks
+1. **Process Zombies**: Implement proper signal handling and cleanup
+2. **Log Overflow**: Automatic rotation and size limits
+3. **Resource Exhaustion**: Hard limits on CPU/memory per process
+4. **SQL Injection**: Parameterized queries only
+5. **Command Injection**: Whitelist validation of executables
+
+### Operational Risks
+1. **Data Loss**: WAL mode + regular backups
+2. **Performance Degradation**: Metrics monitoring + alerts
+3. **Security Breach**: Sandboxing + audit logging
+4. **Cascade Failures**: Circuit breakers + retry logic

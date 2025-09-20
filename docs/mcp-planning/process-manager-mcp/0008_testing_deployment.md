@@ -1,0 +1,872 @@
+# Comprehensive Testing and Deployment Strategy
+
+## Overview
+Complete testing framework including unit tests, integration tests, end-to-end tests, and deployment pipeline for the Process Manager MCP Server.
+
+## Testing Architecture
+
+### Test Structure
+```
+tests/
+├── unit/               # Unit tests for individual components
+│   ├── database.test.ts
+│   ├── process.test.ts
+│   ├── logs.test.ts
+│   ├── errors.test.ts
+│   └── groups.test.ts
+├── integration/        # Integration tests for combined components
+│   ├── lifecycle.test.ts
+│   ├── monitoring.test.ts
+│   └── resources.test.ts
+├── e2e/               # End-to-end MCP protocol tests
+│   ├── mcp-protocol.test.ts
+│   └── full-workflow.test.ts
+├── fixtures/          # Test data and mocks
+│   ├── processes.json
+│   └── responses.json
+└── helpers/           # Test utilities
+    ├── setup.ts
+    └── mocks.ts
+```
+
+## Unit Test Implementations
+
+### Database Unit Tests
+```typescript
+// tests/unit/database.test.ts
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { DatabaseManager } from '../../src/database/manager';
+import winston from 'winston';
+import Database from 'better-sqlite3';
+
+describe('DatabaseManager', () => {
+  let db: DatabaseManager;
+  let logger: winston.Logger;
+
+  beforeEach(() => {
+    logger = winston.createLogger({ silent: true });
+    db = new DatabaseManager(':memory:', logger);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  describe('Schema initialization', () => {
+    it('should create all required tables', () => {
+      const tables = db.getDb()
+        .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+        .all()
+        .map(r => r.name);
+
+      expect(tables).toContain('processes');
+      expect(tables).toContain('logs');
+      expect(tables).toContain('errors');
+      expect(tables).toContain('process_groups');
+      expect(tables).toContain('metrics');
+    });
+
+    it('should create all required indexes', () => {
+      const indexes = db.getDb()
+        .prepare("SELECT name FROM sqlite_master WHERE type='index'")
+        .all()
+        .map(r => r.name);
+
+      expect(indexes).toContain('idx_logs_process_timestamp');
+      expect(indexes).toContain('idx_errors_process_timestamp');
+      expect(indexes).toContain('idx_metrics_process_timestamp');
+    });
+  });
+
+  describe('Prepared statements', () => {
+    it('should prepare all required statements', () => {
+      expect(() => db.getStatement('insertProcess')).not.toThrow();
+      expect(() => db.getStatement('insertLog')).not.toThrow();
+      expect(() => db.getStatement('insertError')).not.toThrow();
+      expect(() => db.getStatement('insertMetric')).not.toThrow();
+    });
+
+    it('should handle missing statements gracefully', () => {
+      expect(() => db.getStatement('nonexistent')).toThrow('not found');
+    });
+  });
+
+  describe('Transaction handling', () => {
+    it('should rollback on error', () => {
+      const insertStmt = db.getStatement('insertProcess');
+
+      expect(() => {
+        db.transaction(() => {
+          insertStmt.run({
+            id: 'test-1',
+            name: 'Test Process',
+            command: 'node',
+            args: '[]',
+            env: '{}',
+            cwd: '/tmp',
+            status: 'running',
+            created_at: Date.now()
+          });
+
+          throw new Error('Rollback test');
+        });
+      }).toThrow('Rollback test');
+
+      const count = db.getDb()
+        .prepare('SELECT COUNT(*) as count FROM processes')
+        .get() as { count: number };
+
+      expect(count.count).toBe(0);
+    });
+  });
+
+  describe('Cleanup operations', () => {
+    it('should cleanup old data', () => {
+      const now = Date.now();
+      const old = now - (31 * 24 * 60 * 60 * 1000); // 31 days ago
+
+      // Insert old and new logs
+      const insertLog = db.getStatement('insertLog');
+      insertLog.run({
+        process_id: 'test-1',
+        type: 'stdout',
+        message: 'Old log',
+        timestamp: old,
+        level: 'info'
+      });
+      insertLog.run({
+        process_id: 'test-1',
+        type: 'stdout',
+        message: 'New log',
+        timestamp: now,
+        level: 'info'
+      });
+
+      db.cleanupOldData(30);
+
+      const logs = db.getDb()
+        .prepare('SELECT * FROM logs')
+        .all();
+
+      expect(logs).toHaveLength(1);
+      expect(logs[0].message).toBe('New log');
+    });
+  });
+});
+```
+
+### Process Manager Unit Tests
+```typescript
+// tests/unit/process.test.ts
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { ProcessManager } from '../../src/process/manager';
+import { DatabaseManager } from '../../src/database/manager';
+import { ConfigManager } from '../../src/config/manager';
+import { LogManager } from '../../src/logs/manager';
+import winston from 'winston';
+import { ChildProcess } from 'child_process';
+
+describe('ProcessManager', () => {
+  let processManager: ProcessManager;
+  let db: DatabaseManager;
+  let config: ConfigManager;
+  let logManager: LogManager;
+  let logger: winston.Logger;
+
+  beforeEach(() => {
+    logger = winston.createLogger({ silent: true });
+    config = new ConfigManager();
+    db = new DatabaseManager(':memory:', logger);
+    logManager = new LogManager(db, logger);
+    processManager = new ProcessManager(db, logger, config, logManager);
+  });
+
+  afterEach(() => {
+    processManager.shutdown();
+    db.close();
+  });
+
+  describe('Process lifecycle', () => {
+    it('should start a process successfully', async () => {
+      const info = await processManager.startProcess({
+        name: 'test-echo',
+        command: 'echo',
+        args: ['Hello World']
+      });
+
+      expect(info.id).toBeDefined();
+      expect(info.name).toBe('test-echo');
+      expect(info.status).toBe('starting');
+    });
+
+    it('should enforce max process limit', async () => {
+      // Mock config to have low limit
+      vi.spyOn(config, 'get').mockImplementation((key) => {
+        if (key === 'PM_MAX_PROCESSES') return 1;
+        return config.get(key);
+      });
+
+      await processManager.startProcess({
+        name: 'test-1',
+        command: 'sleep',
+        args: ['1']
+      });
+
+      await expect(processManager.startProcess({
+        name: 'test-2',
+        command: 'sleep',
+        args: ['1']
+      })).rejects.toThrow('Maximum process limit reached');
+    });
+
+    it('should stop a process gracefully', async () => {
+      const info = await processManager.startProcess({
+        name: 'test-sleep',
+        command: 'sleep',
+        args: ['10']
+      });
+
+      await processManager.stopProcess(info.id);
+
+      const processes = processManager.listProcesses();
+      const stopped = processes.find(p => p.id === info.id);
+
+      expect(stopped?.status).not.toBe('running');
+    });
+
+    it('should restart a process with new config', async () => {
+      const info = await processManager.startProcess({
+        name: 'test',
+        command: 'echo',
+        args: ['v1']
+      });
+
+      const restarted = await processManager.restartProcess(info.id, {
+        args: ['v2']
+      });
+
+      expect(restarted.id).toBe(info.id);
+      expect(restarted.args).toEqual(['v2']);
+      expect(restarted.restartCount).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Command validation', () => {
+    it('should reject disallowed commands', async () => {
+      vi.spyOn(config, 'isCommandAllowed').mockReturnValue(false);
+
+      await expect(processManager.startProcess({
+        name: 'test',
+        command: '/evil/command'
+      })).rejects.toThrow('Command not allowed');
+    });
+  });
+
+  describe('Health checks', () => {
+    it('should setup health checks for configured processes', async () => {
+      const info = await processManager.startProcess({
+        name: 'test',
+        command: 'echo',
+        args: ['test'],
+        healthCheckCommand: 'echo OK',
+        healthCheckInterval: 1000
+      });
+
+      // Verify health check is scheduled
+      expect(info.healthCheckCommand).toBe('echo OK');
+      expect(info.healthCheckInterval).toBe(1000);
+    });
+  });
+});
+```
+
+## Integration Test Implementations
+
+### MCP Protocol Integration Tests
+```typescript
+// tests/integration/mcp-protocol.test.ts
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { spawn, ChildProcess } from 'child_process';
+import { promisify } from 'util';
+import { exec as execCallback } from 'child_process';
+
+const exec = promisify(execCallback);
+
+describe('MCP Protocol Integration', () => {
+  let serverProcess: ChildProcess;
+
+  beforeAll(async () => {
+    // Build the server
+    await exec('npm run build');
+  });
+
+  async function sendRequest(request: any): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const child = spawn('node', ['dist/index.js'], {
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      let response = '';
+
+      child.stdout.on('data', (data) => {
+        response += data.toString();
+      });
+
+      child.stderr.on('data', (data) => {
+        console.error('Server error:', data.toString());
+      });
+
+      child.on('close', () => {
+        try {
+          const parsed = JSON.parse(response);
+          resolve(parsed);
+        } catch (error) {
+          reject(new Error(`Invalid response: ${response}`));
+        }
+      });
+
+      child.stdin.write(JSON.stringify(request) + '\n');
+      child.stdin.end();
+    });
+  }
+
+  describe('Server initialization', () => {
+    it('should respond to initialize request', async () => {
+      const response = await sendRequest({
+        jsonrpc: '2.0',
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: {
+            name: 'test-client',
+            version: '1.0.0'
+          }
+        },
+        id: 1
+      });
+
+      expect(response.result).toBeDefined();
+      expect(response.result.protocolVersion).toBe('2024-11-05');
+      expect(response.result.capabilities).toBeDefined();
+      expect(response.result.serverInfo.name).toBe('process-manager-mcp');
+    });
+  });
+
+  describe('Tool discovery', () => {
+    it('should list all available tools', async () => {
+      const response = await sendRequest({
+        jsonrpc: '2.0',
+        method: 'tools/list',
+        params: {},
+        id: 2
+      });
+
+      expect(response.result.tools).toBeDefined();
+      expect(response.result.tools.length).toBeGreaterThan(0);
+
+      const toolNames = response.result.tools.map(t => t.name);
+      expect(toolNames).toContain('start_process');
+      expect(toolNames).toContain('stop_process');
+      expect(toolNames).toContain('get_logs');
+      expect(toolNames).toContain('get_errors');
+    });
+  });
+
+  describe('Resource discovery', () => {
+    it('should list all available resources', async () => {
+      const response = await sendRequest({
+        jsonrpc: '2.0',
+        method: 'resources/list',
+        params: {},
+        id: 3
+      });
+
+      expect(response.result.resources).toBeDefined();
+      expect(response.result.resources.length).toBe(6);
+
+      const resourceUris = response.result.resources.map(r => r.uri);
+      expect(resourceUris).toContain('processes://list');
+      expect(resourceUris).toContain('logs://recent');
+      expect(resourceUris).toContain('health://status');
+    });
+  });
+
+  describe('Prompt discovery', () => {
+    it('should list all available prompts', async () => {
+      const response = await sendRequest({
+        jsonrpc: '2.0',
+        method: 'prompts/list',
+        params: {},
+        id: 4
+      });
+
+      expect(response.result.prompts).toBeDefined();
+      expect(response.result.prompts.length).toBe(4);
+
+      const promptNames = response.result.prompts.map(p => p.name);
+      expect(promptNames).toContain('debug_process');
+      expect(promptNames).toContain('optimize_performance');
+    });
+  });
+});
+```
+
+## End-to-End Test Implementation
+
+### Full Workflow E2E Test
+```typescript
+// tests/e2e/full-workflow.test.ts
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { MCPTestClient } from '../helpers/mcp-client';
+
+describe('Full Workflow E2E', () => {
+  let client: MCPTestClient;
+
+  beforeAll(async () => {
+    client = new MCPTestClient();
+    await client.start();
+    await client.initialize();
+  });
+
+  afterAll(async () => {
+    await client.stop();
+  });
+
+  it('should complete full process lifecycle workflow', async () => {
+    // 1. Create a process group
+    const group = await client.callTool('create_group', {
+      name: 'test-stack',
+      description: 'Test application stack'
+    });
+    expect(group.data.id).toBeDefined();
+
+    // 2. Start first process
+    const proc1 = await client.callTool('start_process', {
+      name: 'backend',
+      command: 'node',
+      args: ['-e', 'setInterval(() => console.log("Backend running"), 1000)'],
+      healthCheckCommand: 'echo OK',
+      healthCheckInterval: 5000
+    });
+    expect(proc1.data.id).toBeDefined();
+
+    // 3. Add to group
+    await client.callTool('add_to_group', {
+      processId: proc1.data.id,
+      groupId: group.data.id
+    });
+
+    // 4. Start second process
+    const proc2 = await client.callTool('start_process', {
+      name: 'frontend',
+      command: 'node',
+      args: ['-e', 'setInterval(() => console.log("Frontend running"), 1000)']
+    });
+
+    // 5. Add to group
+    await client.callTool('add_to_group', {
+      processId: proc2.data.id,
+      groupId: group.data.id
+    });
+
+    // 6. Wait for logs to accumulate
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // 7. Check process info
+    const info = await client.callTool('get_process_info', {
+      processId: proc1.data.id
+    });
+    expect(info.data.status).toBe('running');
+
+    // 8. Get logs
+    const logs = await client.callTool('get_logs', {
+      processId: proc1.data.id,
+      limit: 10
+    });
+    expect(logs.data.length).toBeGreaterThan(0);
+
+    // 9. Check health
+    const health = await client.callTool('check_process_health', {
+      processId: proc1.data.id
+    });
+    expect(health.data.status).toBe('healthy');
+
+    // 10. Read resources
+    const processList = await client.readResource('processes://list');
+    expect(processList.contents[0].text).toContain(proc1.data.id);
+
+    // 11. Get a prompt
+    const debugPrompt = await client.getPrompt('debug_process', {
+      processId: proc1.data.id
+    });
+    expect(debugPrompt.messages[0].content.text).toContain('debugging');
+
+    // 12. Stop the group
+    await client.callTool('stop_group', {
+      groupId: group.data.id,
+      stopStrategy: 'reverse'
+    });
+
+    // 13. Verify processes stopped
+    const finalList = await client.callTool('list_processes', {});
+    const runningCount = finalList.data.filter(p => p.status === 'running').length;
+    expect(runningCount).toBe(0);
+  });
+
+  it('should handle error scenarios gracefully', async () => {
+    // Test invalid process start
+    const result = await client.callTool('start_process', {
+      name: 'invalid',
+      command: '/nonexistent/command'
+    });
+    expect(result.isError).toBe(true);
+
+    // Test stopping non-existent process
+    const stopResult = await client.callTool('stop_process', {
+      processId: 'nonexistent-id'
+    });
+    expect(stopResult.isError).toBe(true);
+  });
+});
+```
+
+## Test Helpers
+
+### MCP Test Client Helper
+```typescript
+// tests/helpers/mcp-client.ts
+import { spawn, ChildProcess } from 'child_process';
+import { EventEmitter } from 'events';
+
+export class MCPTestClient extends EventEmitter {
+  private process?: ChildProcess;
+  private messageId: number = 0;
+  private pendingRequests: Map<number, {
+    resolve: (value: any) => void;
+    reject: (error: any) => void;
+  }> = new Map();
+
+  async start(): Promise<void> {
+    this.process = spawn('node', ['dist/index.js'], {
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    this.process.stdout?.on('data', (data) => {
+      this.handleResponse(data.toString());
+    });
+
+    this.process.stderr?.on('data', (data) => {
+      console.error('Server error:', data.toString());
+    });
+  }
+
+  async stop(): Promise<void> {
+    if (this.process) {
+      this.process.kill('SIGTERM');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+
+  private handleResponse(data: string): void {
+    try {
+      const response = JSON.parse(data);
+      const pending = this.pendingRequests.get(response.id);
+      if (pending) {
+        if (response.error) {
+          pending.reject(response.error);
+        } else {
+          pending.resolve(response.result);
+        }
+        this.pendingRequests.delete(response.id);
+      }
+    } catch (error) {
+      console.error('Failed to parse response:', data);
+    }
+  }
+
+  private async sendRequest(method: string, params: any = {}): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const id = ++this.messageId;
+      const request = {
+        jsonrpc: '2.0',
+        method,
+        params,
+        id
+      };
+
+      this.pendingRequests.set(id, { resolve, reject });
+      this.process?.stdin?.write(JSON.stringify(request) + '\n');
+
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        if (this.pendingRequests.has(id)) {
+          this.pendingRequests.delete(id);
+          reject(new Error('Request timeout'));
+        }
+      }, 5000);
+    });
+  }
+
+  async initialize(): Promise<any> {
+    return this.sendRequest('initialize', {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: {
+        name: 'test-client',
+        version: '1.0.0'
+      }
+    });
+  }
+
+  async callTool(name: string, arguments: any): Promise<any> {
+    return this.sendRequest('tools/call', { name, arguments });
+  }
+
+  async readResource(uri: string): Promise<any> {
+    return this.sendRequest('resources/read', { uri });
+  }
+
+  async getPrompt(name: string, arguments: any): Promise<any> {
+    return this.sendRequest('prompts/get', { name, arguments });
+  }
+}
+```
+
+## Deployment Configuration
+
+### Docker Configuration
+```dockerfile
+# Dockerfile
+FROM node:18-alpine
+
+# Install required system dependencies
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    sqlite3
+
+# Create app directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --only=production
+
+# Copy built application
+COPY dist ./dist
+COPY .env.example ./.env
+
+# Create data directory
+RUN mkdir -p /data
+
+# Set environment variables
+ENV PM_DATABASE_PATH=/data/process-manager.db
+ENV NODE_ENV=production
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD node -e "process.exit(0)"
+
+# Run as non-root user
+USER node
+
+# Start the server
+CMD ["node", "dist/index.js"]
+```
+
+### GitHub Actions CI/CD
+```yaml
+# .github/workflows/ci.yml
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint code
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test -- --coverage
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage/lcov.info
+
+      - name: Build
+        run: npm run build
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish to npm
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Build Docker image
+        run: docker build -t process-manager-mcp:${{ github.sha }} .
+
+      - name: Push to Docker Hub
+        run: |
+          echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+          docker tag process-manager-mcp:${{ github.sha }} ${{ secrets.DOCKER_USERNAME }}/process-manager-mcp:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/process-manager-mcp:latest
+```
+
+### NPM Package Configuration
+```json
+// package.json additions
+{
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "process-manager-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "vitest run tests/e2e",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write src/**/*.ts",
+    "prepublishOnly": "npm run build && npm test",
+    "docker:build": "docker build -t process-manager-mcp .",
+    "docker:run": "docker run -it --rm -v $(pwd)/data:/data process-manager-mcp"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+```
+
+## Success Criteria
+
+### Testing Checklist
+- [ ] 100% unit test coverage for core modules
+- [ ] Integration tests for all tool combinations
+- [ ] E2E tests for complete workflows
+- [ ] Error scenario coverage
+- [ ] Performance benchmarks pass
+- [ ] Memory leak tests pass
+- [ ] Concurrent operation tests pass
+- [ ] MCP protocol compliance verified
+
+### Deployment Checklist
+- [ ] Docker image builds successfully
+- [ ] CI/CD pipeline configured
+- [ ] NPM package publishable
+- [ ] Health checks implemented
+- [ ] Monitoring endpoints available
+- [ ] Security scanning passes
+- [ ] Documentation complete
+- [ ] Example configurations provided
+
+### Performance Benchmarks
+- [ ] Handle 100+ concurrent processes
+- [ ] Process 10,000 logs/second
+- [ ] Query 1M logs in < 100ms
+- [ ] Memory usage < 200MB for 50 processes
+- [ ] Startup time < 1 second
+- [ ] Graceful shutdown < 5 seconds
+
+## Dependencies
+- All previous tasks (0001-0007) must be complete
+- Test fixtures and helpers prepared
+- CI/CD secrets configured
+- Docker Hub account ready
+- NPM account configured
+
+## Next Steps
+After testing and deployment:
+1. Write comprehensive documentation (Task 0009)
+2. Implement security hardening (Task 0010)
+3. Add performance optimizations (Task 0011)
+---
+## TDD Roadmap (Updated)
+
+0) Harness & Protocol Guards (fail first)
+- Vitest, ESLint, tsc --noEmit in CI. Add MCPTestClient. Assert stdout only carries valid JSON‑RPC; logs are on stderr.
+- Single `tools/list` and `tools/call` dispatcher; verify aggregated list contains all tools; validate JSON Schema with ajv.
+
+1) Config & DB
+- Tables/indexes created; PRAGMAs applied; cleanupOldData works; allowed path validation rejects non‑subpaths and symlink escapes.
+
+2) Lifecycle
+- Start/stop/restart/kill; max process limit; log capture via LogManager buffer; status transitions.
+
+3) Logs
+- Buffered flush; backpressure; tail follow lifecycle; search; stats.
+
+4) Monitoring & Health
+- pidusage for live PIDs; execFile health checks with timeouts/output caps; auto‑restart with backoff; cache caps.
+
+5) Errors
+- Categorization; resolution tracking; summary/trends/similar; size caps.
+
+6) Groups
+- Startup order; stop strategies; partial failures; status aggregation.
+
+7) Resources & Prompts
+- resources/list/read JSON; prompts/list/get include description; performance budget.
+
+8) E2E
+- Initialize → discovery → lifecycle → logs → health → groups → resources → prompts; negative cases.
+
+## CI Gates (Updated)
+- Lint + typecheck + unit tests with coverage ≥ 85%.
+- Protocol smoke test: spawn server, send `initialize`, `tools/list`.
+- Optional: pre-commit hook to run lint+typecheck+unit tests.
+
+## Persistence & Deployment (Daemon Mode)
+- Provide a separate long‑lived daemon process (supervisor) with:
+  - Local IPC (Unix socket/TCP 127.0.0.1) and PM_DAEMON_TOKEN auth.
+  - Lockfile/socket binding to enforce single instance.
+  - Auto‑start from stdio shim if enabled.
+- Containerization: expose daemon and a thin stdio entrypoint. Ensure healthcheck validates daemon readiness.

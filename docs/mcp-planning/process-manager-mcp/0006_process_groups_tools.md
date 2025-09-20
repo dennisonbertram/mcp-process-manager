@@ -1,0 +1,820 @@
+# Process Group Management Tools
+
+## Overview
+Implementation of process group orchestration tools for managing related processes as cohesive units with dependency management and coordinated lifecycle control.
+
+## Group Manager Implementation
+
+### Group Manager Service
+```typescript
+// src/groups/manager.ts
+import { DatabaseManager } from '../database/manager.js';
+import { ProcessManager } from '../process/manager.js';
+import winston from 'winston';
+import { ProcessGroup, ProcessInfo, ProcessStatus } from '../types/process.js';
+import { nanoid } from 'nanoid';
+import { EventEmitter } from 'events';
+
+export interface GroupConfig {
+  name: string;
+  description?: string;
+  startupOrder?: string[]; // Process IDs in startup sequence
+  startupDelay?: number;   // Milliseconds between starting each process
+  stopStrategy?: 'parallel' | 'reverse' | 'sequential';
+}
+
+export interface GroupStatus {
+  group: ProcessGroup;
+  processes: ProcessInfo[];
+  healthyCount: number;
+  runningCount: number;
+  stoppedCount: number;
+  failedCount: number;
+}
+
+export class GroupManager extends EventEmitter {
+  private database: DatabaseManager;
+  private processManager: ProcessManager;
+  private logger: winston.Logger;
+  private groups: Map<string, ProcessGroup>;
+
+  constructor(
+    database: DatabaseManager,
+    processManager: ProcessManager,
+    logger: winston.Logger
+  ) {
+    super();
+    this.database = database;
+    this.processManager = processManager;
+    this.logger = logger;
+    this.groups = new Map();
+
+    this.loadGroups();
+  }
+
+  private loadGroups(): void {
+    try {
+      const groups = this.database.getDb()
+        .prepare('SELECT * FROM process_groups')
+        .all();
+
+      for (const group of groups) {
+        this.groups.set(group.id, {
+          id: group.id,
+          name: group.name,
+          description: group.description,
+          createdAt: group.created_at,
+          startupOrder: group.startup_order ? JSON.parse(group.startup_order) : undefined
+        });
+      }
+
+      this.logger.info(`Loaded ${groups.length} process groups`);
+    } catch (error) {
+      this.logger.error('Failed to load process groups:', error);
+    }
+  }
+
+  async createGroup(config: GroupConfig): Promise<ProcessGroup> {
+    const groupId = nanoid();
+
+    const group: ProcessGroup = {
+      id: groupId,
+      name: config.name,
+      description: config.description,
+      createdAt: Date.now(),
+      startupOrder: config.startupOrder
+    };
+
+    // Store in database
+    this.database.getDb().prepare(`
+      INSERT INTO process_groups (id, name, description, created_at, startup_order)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(
+      group.id,
+      group.name,
+      group.description || null,
+      group.createdAt,
+      group.startupOrder ? JSON.stringify(group.startupOrder) : null
+    );
+
+    this.groups.set(groupId, group);
+    this.emit('groupCreated', group);
+
+    return group;
+  }
+
+  async addToGroup(processId: string, groupId: string): Promise<void> {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      throw new Error(`Group ${groupId} not found`);
+    }
+
+    const processes = this.processManager.listProcesses();
+    const process = processes.find(p => p.id === processId);
+
+    if (!process) {
+      throw new Error(`Process ${processId} not found`);
+    }
+
+    // Update process group association
+    this.database.getDb().prepare(`
+      UPDATE processes SET group_id = ? WHERE id = ?
+    `).run(groupId, processId);
+
+    // Update startup order if needed
+    if (!group.startupOrder) {
+      group.startupOrder = [];
+    }
+
+    if (!group.startupOrder.includes(processId)) {
+      group.startupOrder.push(processId);
+
+      this.database.getDb().prepare(`
+        UPDATE process_groups SET startup_order = ? WHERE id = ?
+      `).run(JSON.stringify(group.startupOrder), groupId);
+    }
+
+    this.emit('processAddedToGroup', { processId, groupId });
+  }
+
+  async removeFromGroup(processId: string): Promise<void> {
+    // Clear group association
+    this.database.getDb().prepare(`
+      UPDATE processes SET group_id = NULL WHERE id = ?
+    `).run(processId);
+
+    // Remove from startup orders
+    for (const group of this.groups.values()) {
+      if (group.startupOrder?.includes(processId)) {
+        group.startupOrder = group.startupOrder.filter(id => id !== processId);
+
+        this.database.getDb().prepare(`
+          UPDATE process_groups SET startup_order = ? WHERE id = ?
+        `).run(
+          group.startupOrder.length > 0 ? JSON.stringify(group.startupOrder) : null,
+          group.id
+        );
+      }
+    }
+
+    this.emit('processRemovedFromGroup', { processId });
+  }
+
+  async startGroup(
+    groupId: string,
+    options: {
+      startupDelay?: number;
+      skipRunning?: boolean;
+    } = {}
+  ): Promise<ProcessInfo[]> {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      throw new Error(`Group ${groupId} not found`);
+    }
+
+    const startupDelay = options.startupDelay || 1000;
+    const skipRunning = options.skipRunning ?? true;
+
+    // Get all processes in group
+    const allProcesses = this.processManager.listProcesses();
+    const groupProcesses = allProcesses.filter(p => p.groupId === groupId);
+
+    // Determine startup order
+    let startupSequence: ProcessInfo[];
+
+    if (group.startupOrder && group.startupOrder.length > 0) {
+      // Use defined startup order
+      startupSequence = [];
+      for (const processId of group.startupOrder) {
+        const process = groupProcesses.find(p => p.id === processId);
+        if (process) {
+          startupSequence.push(process);
+        }
+      }
+
+      // Add any processes not in startup order at the end
+      const unorderedProcesses = groupProcesses.filter(
+        p => !group.startupOrder!.includes(p.id)
+      );
+      startupSequence.push(...unorderedProcesses);
+    } else {
+      // Start all processes in parallel (no specific order)
+      startupSequence = groupProcesses;
+    }
+
+    const startedProcesses: ProcessInfo[] = [];
+    const errors: Array<{ processId: string; error: string }> = [];
+
+    for (const process of startupSequence) {
+      // Skip if already running and skipRunning is true
+      if (skipRunning && process.status === ProcessStatus.RUNNING) {
+        this.logger.info(`Skipping already running process ${process.id}`);
+        startedProcesses.push(process);
+        continue;
+      }
+
+      try {
+        this.logger.info(`Starting process ${process.id} in group ${groupId}`);
+
+        const startedProcess = await this.processManager.startProcess({
+          id: process.id,
+          name: process.name,
+          command: process.command,
+          args: process.args,
+          env: process.env,
+          cwd: process.cwd,
+          autoRestart: process.autoRestart,
+          healthCheckCommand: process.healthCheckCommand,
+          healthCheckInterval: process.healthCheckInterval,
+          groupId: process.groupId
+        });
+
+        startedProcesses.push(startedProcess);
+
+        // Wait before starting next process (if configured)
+        if (startupDelay > 0 && startupSequence.indexOf(process) < startupSequence.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, startupDelay));
+        }
+      } catch (error) {
+        this.logger.error(`Failed to start process ${process.id} in group ${groupId}:`, error);
+        errors.push({ processId: process.id, error: error.message });
+      }
+    }
+
+    if (errors.length > 0) {
+      this.emit('groupStartErrors', { groupId, errors });
+    }
+
+    this.emit('groupStarted', { groupId, processes: startedProcesses });
+
+    return startedProcesses;
+  }
+
+  async stopGroup(
+    groupId: string,
+    options: {
+      stopStrategy?: 'parallel' | 'reverse' | 'sequential';
+      force?: boolean;
+    } = {}
+  ): Promise<void> {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      throw new Error(`Group ${groupId} not found`);
+    }
+
+    const stopStrategy = options.stopStrategy || 'reverse';
+    const force = options.force || false;
+
+    // Get all running processes in group
+    const allProcesses = this.processManager.listProcesses();
+    const groupProcesses = allProcesses.filter(
+      p => p.groupId === groupId && p.status === ProcessStatus.RUNNING
+    );
+
+    // Determine stop order based on strategy
+    let stopSequence: ProcessInfo[];
+
+    switch (stopStrategy) {
+      case 'reverse':
+        // Stop in reverse startup order
+        if (group.startupOrder) {
+          stopSequence = [...groupProcesses].sort((a, b) => {
+            const aIndex = group.startupOrder!.indexOf(a.id);
+            const bIndex = group.startupOrder!.indexOf(b.id);
+            return bIndex - aIndex; // Reverse order
+          });
+        } else {
+          stopSequence = [...groupProcesses].reverse();
+        }
+        break;
+
+      case 'sequential':
+        // Stop in startup order
+        if (group.startupOrder) {
+          stopSequence = [...groupProcesses].sort((a, b) => {
+            const aIndex = group.startupOrder!.indexOf(a.id);
+            const bIndex = group.startupOrder!.indexOf(b.id);
+            return aIndex - bIndex;
+          });
+        } else {
+          stopSequence = groupProcesses;
+        }
+        break;
+
+      case 'parallel':
+      default:
+        // Stop all at once
+        stopSequence = groupProcesses;
+        break;
+    }
+
+    // Stop processes
+    if (stopStrategy === 'parallel') {
+      // Stop all processes in parallel
+      const stopPromises = stopSequence.map(process =>
+        this.processManager.stopProcess(process.id, force)
+          .catch(error => {
+            this.logger.error(`Failed to stop process ${process.id}:`, error);
+          })
+      );
+
+      await Promise.all(stopPromises);
+    } else {
+      // Stop processes sequentially
+      for (const process of stopSequence) {
+        try {
+          await this.processManager.stopProcess(process.id, force);
+        } catch (error) {
+          this.logger.error(`Failed to stop process ${process.id}:`, error);
+        }
+      }
+    }
+
+    this.emit('groupStopped', { groupId });
+  }
+
+  async getGroupStatus(groupId: string): Promise<GroupStatus> {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      throw new Error(`Group ${groupId} not found`);
+    }
+
+    const allProcesses = this.processManager.listProcesses();
+    const groupProcesses = allProcesses.filter(p => p.groupId === groupId);
+
+    const status: GroupStatus = {
+      group,
+      processes: groupProcesses,
+      healthyCount: 0,
+      runningCount: 0,
+      stoppedCount: 0,
+      failedCount: 0
+    };
+
+    for (const process of groupProcesses) {
+      if (process.healthStatus === 'healthy') status.healthyCount++;
+
+      switch (process.status) {
+        case ProcessStatus.RUNNING:
+          status.runningCount++;
+          break;
+        case ProcessStatus.STOPPED:
+          status.stoppedCount++;
+          break;
+        case ProcessStatus.FAILED:
+        case ProcessStatus.CRASHED:
+          status.failedCount++;
+          break;
+      }
+    }
+
+    return status;
+  }
+
+  async deleteGroup(groupId: string): Promise<void> {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      throw new Error(`Group ${groupId} not found`);
+    }
+
+    // Check if group has processes
+    const allProcesses = this.processManager.listProcesses();
+    const groupProcesses = allProcesses.filter(p => p.groupId === groupId);
+
+    if (groupProcesses.length > 0) {
+      throw new Error(`Cannot delete group ${groupId}: contains ${groupProcesses.length} processes`);
+    }
+
+    // Delete from database
+    this.database.getDb().prepare('DELETE FROM process_groups WHERE id = ?').run(groupId);
+
+    // Remove from cache
+    this.groups.delete(groupId);
+
+    this.emit('groupDeleted', { groupId });
+  }
+
+  listGroups(): ProcessGroup[] {
+    return Array.from(this.groups.values());
+  }
+
+  getGroup(groupId: string): ProcessGroup | undefined {
+    return this.groups.get(groupId);
+  }
+}
+```
+
+## Tool Implementations
+
+### Group Tools Registration
+```typescript
+// src/tools/groups.ts
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { z } from 'zod';
+import { GroupManager } from '../groups/manager.js';
+import winston from 'winston';
+
+// Schema definitions
+const CreateGroupSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  startupOrder: z.array(z.string()).optional(),
+  startupDelay: z.number().min(0).optional()
+});
+
+const AddToGroupSchema = z.object({
+  processId: z.string().min(1),
+  groupId: z.string().min(1)
+});
+
+const StartGroupSchema = z.object({
+  groupId: z.string().min(1),
+  startupDelay: z.number().min(0).optional(),
+  skipRunning: z.boolean().optional()
+});
+
+const StopGroupSchema = z.object({
+  groupId: z.string().min(1),
+  stopStrategy: z.enum(['parallel', 'reverse', 'sequential']).optional(),
+  force: z.boolean().optional()
+});
+
+export function registerGroupTools(
+  server: Server,
+  groupManager: GroupManager,
+  logger: winston.Logger
+): void {
+  // Tool: create_group
+  server.setRequestHandler({
+    method: 'tools/call',
+    handler: async (request) => {
+      if (request.params.name === 'create_group') {
+        try {
+          const args = CreateGroupSchema.parse(request.params.arguments);
+          const group = await groupManager.createGroup(args);
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Created process group "${group.name}" with ID: ${group.id}`
+              }
+            ],
+            data: group
+          };
+        } catch (error) {
+          logger.error('Failed to create group:', error);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to create group: ${error.message}`
+              }
+            ],
+            isError: true
+          };
+        }
+      }
+
+      // Tool: add_to_group
+      if (request.params.name === 'add_to_group') {
+        try {
+          const args = AddToGroupSchema.parse(request.params.arguments);
+          await groupManager.addToGroup(args.processId, args.groupId);
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Added process ${args.processId} to group ${args.groupId}`
+              }
+            ]
+          };
+        } catch (error) {
+          logger.error('Failed to add to group:', error);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to add to group: ${error.message}`
+              }
+            ],
+            isError: true
+          };
+        }
+      }
+
+      // Tool: start_group
+      if (request.params.name === 'start_group') {
+        try {
+          const args = StartGroupSchema.parse(request.params.arguments);
+          const processes = await groupManager.startGroup(args.groupId, {
+            startupDelay: args.startupDelay,
+            skipRunning: args.skipRunning
+          });
+
+          const status = await groupManager.getGroupStatus(args.groupId);
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Started group ${args.groupId}: ${processes.length} processes\nRunning: ${status.runningCount}, Failed: ${status.failedCount}`
+              }
+            ],
+            data: { processes, status }
+          };
+        } catch (error) {
+          logger.error('Failed to start group:', error);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to start group: ${error.message}`
+              }
+            ],
+            isError: true
+          };
+        }
+      }
+
+      // Tool: stop_group
+      if (request.params.name === 'stop_group') {
+        try {
+          const args = StopGroupSchema.parse(request.params.arguments);
+          await groupManager.stopGroup(args.groupId, {
+            stopStrategy: args.stopStrategy,
+            force: args.force
+          });
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Stopped all processes in group ${args.groupId}`
+              }
+            ]
+          };
+        } catch (error) {
+          logger.error('Failed to stop group:', error);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to stop group: ${error.message}`
+              }
+            ],
+            isError: true
+          };
+        }
+      }
+    }
+  });
+
+  // Register tool definitions
+  server.setRequestHandler({
+    method: 'tools/list',
+    handler: async () => {
+      return {
+        tools: [
+          {
+            name: 'create_group',
+            description: 'Create a new process group for managing related processes',
+            inputSchema: CreateGroupSchema
+          },
+          {
+            name: 'add_to_group',
+            description: 'Add a process to an existing group',
+            inputSchema: AddToGroupSchema
+          },
+          {
+            name: 'start_group',
+            description: 'Start all processes in a group with optional startup order',
+            inputSchema: StartGroupSchema
+          },
+          {
+            name: 'stop_group',
+            description: 'Stop all processes in a group with configurable strategy',
+            inputSchema: StopGroupSchema
+          }
+        ]
+      };
+    }
+  });
+}
+```
+
+## Testing Strategy
+
+### Phase 1: Group Logic Testing
+```bash
+# Test group creation and management
+node -e "
+  const groups = new Map();
+  const groupId = 'test-group-1';
+
+  // Create group
+  groups.set(groupId, {
+    id: groupId,
+    name: 'Test Group',
+    startupOrder: ['proc1', 'proc2', 'proc3'],
+    createdAt: Date.now()
+  });
+
+  // Test startup order
+  const group = groups.get(groupId);
+  console.log('Startup order:', group.startupOrder);
+
+  // Test reverse order for shutdown
+  console.log('Shutdown order:', [...group.startupOrder].reverse());
+"
+```
+
+### Phase 2: MCP Tool Testing
+```bash
+# Create a group
+echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"create_group","arguments":{"name":"web-stack","description":"Web application stack"}},"id":1}' | node dist/index.js
+
+# Add process to group
+echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"add_to_group","arguments":{"processId":"PROCESS_ID","groupId":"GROUP_ID"}},"id":2}' | node dist/index.js
+
+# Start group
+echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"start_group","arguments":{"groupId":"GROUP_ID","startupDelay":2000}},"id":3}' | node dist/index.js
+
+# Stop group
+echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"stop_group","arguments":{"groupId":"GROUP_ID","stopStrategy":"reverse"}},"id":4}' | node dist/index.js
+```
+
+### Phase 3: Integration Testing
+```typescript
+// tests/groups.test.ts
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { GroupManager } from '../src/groups/manager';
+import { ProcessManager } from '../src/process/manager';
+import { DatabaseManager } from '../src/database/manager';
+import { ConfigManager } from '../src/config/manager';
+import winston from 'winston';
+
+describe('Process Group Tools', () => {
+  let groupManager: GroupManager;
+  let processManager: ProcessManager;
+  let db: DatabaseManager;
+
+  beforeEach(() => {
+    const logger = winston.createLogger({ silent: true });
+    const config = new ConfigManager();
+    db = new DatabaseManager(':memory:', logger);
+    processManager = new ProcessManager(db, logger, config);
+    groupManager = new GroupManager(db, processManager, logger);
+  });
+
+  afterEach(() => {
+    processManager.shutdown();
+    db.close();
+  });
+
+  it('should create and manage groups', async () => {
+    const group = await groupManager.createGroup({
+      name: 'test-group',
+      description: 'Test group'
+    });
+
+    expect(group.id).toBeDefined();
+    expect(group.name).toBe('test-group');
+
+    const groups = groupManager.listGroups();
+    expect(groups).toHaveLength(1);
+  });
+
+  it('should add processes to groups', async () => {
+    const group = await groupManager.createGroup({ name: 'test' });
+
+    const process = await processManager.startProcess({
+      name: 'test-proc',
+      command: 'node',
+      args: ['-e', 'console.log("test")']
+    });
+
+    await groupManager.addToGroup(process.id, group.id);
+
+    const status = await groupManager.getGroupStatus(group.id);
+    expect(status.processes).toHaveLength(1);
+  });
+
+  it('should start groups with order', async () => {
+    const group = await groupManager.createGroup({
+      name: 'ordered-group',
+      startupOrder: []
+    });
+
+    // Create multiple processes
+    const p1 = await processManager.startProcess({
+      name: 'proc1',
+      command: 'echo',
+      args: ['1']
+    });
+
+    const p2 = await processManager.startProcess({
+      name: 'proc2',
+      command: 'echo',
+      args: ['2']
+    });
+
+    await groupManager.addToGroup(p1.id, group.id);
+    await groupManager.addToGroup(p2.id, group.id);
+
+    const started = await groupManager.startGroup(group.id);
+    expect(started.length).toBeGreaterThan(0);
+  });
+});
+```
+
+## Success Criteria
+
+### Implementation Checklist
+- [ ] Group creation and storage
+- [ ] Process-group association
+- [ ] Startup order management
+- [ ] Sequential startup with delays
+- [ ] Multiple stop strategies (parallel, reverse, sequential)
+- [ ] Group status tracking
+- [ ] Group deletion validation
+- [ ] All 4 group tools implemented
+- [ ] Event emissions for monitoring
+- [ ] Group persistence across restarts
+
+### Performance Metrics
+- [ ] Group creation < 10ms
+- [ ] Process association < 5ms
+- [ ] Group startup orchestration handles 50+ processes
+- [ ] Stop strategies execute correctly
+- [ ] Status calculation < 20ms for large groups
+
+## Dependencies
+- Requires Task 0001 (Server Setup) complete
+- Requires Task 0002 (Process Lifecycle) complete
+- Database must have process_groups table
+- Process manager must support group associations
+
+## Next Steps
+After implementing group tools:
+1. Create resources and prompts (Task 0007)
+2. Implement comprehensive testing (Task 0008)
+3. Create documentation and deployment (Task 0009)
+---
+## Update Notes (2025-09-20)
+
+- Tools registry
+  - Register group tools via central registry; avoid defining extra `tools/list` handlers.
+- Sequencing guarantees
+  - Clarify partial failures: return summary text; emit events; ensure no leaked intervals/timeouts.
+- TDD additions
+  - Tests: ordered startup/stop strategies; partial successes with error propagation; group status aggregation; persistence in daemon-backed mode across stdio restarts.
+
+### Revised Group Tools Example
+```typescript
+// src/tools/groups.ts
+import { z } from 'zod';
+import type winston from 'winston';
+import { GroupManager } from '../groups/manager.js';
+import { registerTool } from './registry.js';
+
+const CreateGroupSchema = z.object({ name: z.string().min(1), description: z.string().optional(), startupOrder: z.array(z.string()).optional(), startupDelay: z.number().min(0).optional() });
+const AddToGroupSchema = z.object({ processId: z.string().min(1), groupId: z.string().min(1) });
+const StartGroupSchema = z.object({ groupId: z.string().min(1), startupDelay: z.number().min(0).optional(), skipRunning: z.boolean().optional() });
+const StopGroupSchema = z.object({ groupId: z.string().min(1), stopStrategy: z.enum(['parallel', 'reverse', 'sequential']).optional(), force: z.boolean().optional() });
+
+export function registerGroupTools(groups: GroupManager, logger: winston.Logger) {
+  registerTool({
+    name: 'create_group', description: 'Create a new process group', schema: CreateGroupSchema,
+    handler: async (args) => {
+      const g = await groups.createGroup(args as any);
+      return [{ type: 'text', text: `Created group ${g.name} (${g.id})` }];
+    },
+  });
+
+  registerTool({
+    name: 'add_to_group', description: 'Add a process to a group', schema: AddToGroupSchema,
+    handler: async ({ processId, groupId }: any) => {
+      await groups.addToGroup(processId, groupId);
+      return [{ type: 'text', text: `Added ${processId} to ${groupId}` }];
+    },
+  });
+
+  registerTool({
+    name: 'start_group', description: 'Start all processes in a group', schema: StartGroupSchema,
+    handler: async ({ groupId, startupDelay, skipRunning }: any) => {
+      const procs = await groups.startGroup(groupId, { startupDelay, skipRunning });
+      return [{ type: 'text', text: `Started group ${groupId}: ${procs.length} processes` }];
+    },
+  });
+
+  registerTool({
+    name: 'stop_group', description: 'Stop all processes in a group', schema: StopGroupSchema,
+    handler: async ({ groupId, stopStrategy, force }: any) => {
+      await groups.stopGroup(groupId, { stopStrategy, force });
+      return [{ type: 'text', text: `Stopped group ${groupId}` }];
+    },
+  });
+}
+```

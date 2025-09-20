@@ -1,0 +1,757 @@
+# README and Documentation
+
+## Overview
+Complete documentation package including user-facing README, installation guides, API documentation, and usage examples for the Process Manager MCP Server.
+
+## Main README Implementation
+
+### README.md
+```markdown
+# Process Manager MCP Server
+
+A comprehensive Model Context Protocol (MCP) server that enables LLMs to manage system processes, monitor their health, collect logs, and handle errors with persistent storage and real-time monitoring.
+
+## Features
+
+### 🚀 Process Management
+- Start, stop, restart, and kill processes with full control
+- Environment variable and working directory configuration
+- Command validation and security restrictions
+- Automatic restart on failure
+
+### 📊 Monitoring & Health
+- Real-time CPU and memory usage tracking
+- Custom health check commands
+- Automatic health monitoring with configurable intervals
+- System resource usage statistics
+
+### 📝 Log Management
+- Persistent log storage in SQLite
+- Real-time log streaming
+- Full-text search across logs
+- Automatic log rotation and cleanup
+
+### 🔍 Error Tracking
+- Intelligent error categorization
+- Stack trace capture and analysis
+- Error resolution tracking
+- Historical error pattern analysis
+
+### 👥 Process Groups
+- Manage related processes as cohesive units
+- Configurable startup order and delays
+- Coordinated stop strategies (parallel, reverse, sequential)
+- Group health monitoring
+
+### 📡 MCP Resources
+- `processes://list` - Real-time process status
+- `logs://recent` - Recent logs across all processes
+- `errors://latest` - Latest unresolved errors
+- `groups://list` - Process group status
+- `health://status` - Health check results
+- `metrics://summary` - Resource usage summary
+
+### 🤖 Interactive Prompts
+- `debug_process` - Step-by-step debugging assistance
+- `optimize_performance` - Performance analysis and recommendations
+- `setup_monitoring` - Comprehensive monitoring configuration
+- `troubleshoot_group` - Group coordination diagnostics
+
+## Installation
+
+### Via NPM (Recommended)
+
+\`\`\`bash
+npm install -g @your-org/process-manager-mcp
+\`\`\`
+
+### Via Docker
+
+\`\`\`bash
+docker pull your-org/process-manager-mcp:latest
+docker run -d \\
+  -v /path/to/data:/data \\
+  -e PM_DATABASE_PATH=/data/process-manager.db \\
+  --name process-manager \\
+  your-org/process-manager-mcp
+\`\`\`
+
+### From Source
+
+\`\`\`bash
+git clone https://github.com/your-org/process-manager-mcp.git
+cd process-manager-mcp
+npm install
+npm run build
+npm start
+\`\`\`
+
+## MCP Client Configuration
+
+### Claude Desktop
+
+Add to your `claude_desktop_config.json`:
+
+\`\`\`json
+{
+  "mcp": {
+    "servers": {
+      "process-manager": {
+        "command": "npx",
+        "args": ["-y", "@your-org/process-manager-mcp"],
+        "env": {
+          "PM_DATABASE_PATH": "/path/to/data/processes.db",
+          "PM_LOG_RETENTION_DAYS": "30",
+          "PM_MAX_PROCESSES": "50"
+        }
+      }
+    }
+  }
+}
+\`\`\`
+
+### Cursor
+
+Add to your Cursor settings:
+
+\`\`\`json
+{
+  "mcp": {
+    "servers": {
+      "process-manager": {
+        "command": "process-manager-mcp",
+        "env": {
+          "PM_DATABASE_PATH": "./data/processes.db"
+        }
+      }
+    }
+  }
+}
+\`\`\`
+
+### Cline
+
+Add to your Cline configuration:
+
+\`\`\`json
+{
+  "mcpServers": {
+    "process-manager": {
+      "command": "npx",
+      "args": ["@your-org/process-manager-mcp"],
+      "env": {
+        "PM_DATABASE_PATH": "${workspaceFolder}/.cline/processes.db"
+      }
+    }
+  }
+}
+\`\`\`
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PM_DATABASE_PATH` | SQLite database file path | `./process-manager.db` |
+| `PM_LOG_RETENTION_DAYS` | Days to retain logs | `30` |
+| `PM_MAX_PROCESSES` | Maximum concurrent processes | `50` |
+| `PM_HEALTH_CHECK_INTERVAL` | Default health check interval (ms) | `60000` |
+| `PM_AUTO_RESTART_ENABLED` | Enable auto-restart on failure | `true` |
+| `PM_LOG_LEVEL` | Logging level (error/warn/info/debug) | `info` |
+| `PM_ALLOWED_COMMANDS` | Comma-separated allowed command paths | `/usr/bin,/usr/local/bin` |
+| `PM_MAX_LOG_SIZE_MB` | Maximum log database size | `100` |
+| `PM_MAX_CPU_PERCENT` | CPU usage limit per process | `80` |
+| `PM_MAX_MEMORY_MB` | Memory limit per process | `1024` |
+
+## Usage Examples
+
+### Starting a Web Server Process
+
+\`\`\`typescript
+// Via MCP tool call
+{
+  "tool": "start_process",
+  "arguments": {
+    "name": "web-server",
+    "command": "node",
+    "args": ["server.js"],
+    "env": {
+      "PORT": "3000",
+      "NODE_ENV": "production"
+    },
+    "cwd": "/app",
+    "autoRestart": true,
+    "healthCheckCommand": "curl -f http://localhost:3000/health",
+    "healthCheckInterval": 30000
+  }
+}
+\`\`\`
+
+### Managing a Process Group
+
+\`\`\`typescript
+// Create a group for your application stack
+{
+  "tool": "create_group",
+  "arguments": {
+    "name": "app-stack",
+    "description": "Main application stack",
+    "startupDelay": 2000
+  }
+}
+
+// Add processes to the group
+{
+  "tool": "add_to_group",
+  "arguments": {
+    "processId": "backend-process-id",
+    "groupId": "app-stack-group-id"
+  }
+}
+
+// Start the entire group
+{
+  "tool": "start_group",
+  "arguments": {
+    "groupId": "app-stack-group-id",
+    "startupDelay": 3000,
+    "skipRunning": true
+  }
+}
+\`\`\`
+
+### Debugging a Failed Process
+
+\`\`\`typescript
+// Use the debug prompt for interactive assistance
+{
+  "prompt": "debug_process",
+  "arguments": {
+    "processId": "failed-process-id"
+  }
+}
+
+// Or manually investigate
+{
+  "tool": "get_errors",
+  "arguments": {
+    "processId": "failed-process-id",
+    "limit": 10
+  }
+}
+
+{
+  "tool": "tail_logs",
+  "arguments": {
+    "processId": "failed-process-id",
+    "lines": 50,
+    "follow": true
+  }
+}
+\`\`\`
+
+## Available Tools
+
+| Tool | Description |
+|------|-------------|
+| **Process Lifecycle** |  |
+| `start_process` | Launch a new managed process |
+| `stop_process` | Gracefully stop a running process |
+| `restart_process` | Restart with optional new configuration |
+| `kill_process` | Force kill a process immediately |
+| `list_processes` | List all managed processes |
+| **Monitoring** |  |
+| `get_process_info` | Detailed process information |
+| `get_process_stats` | CPU/memory usage statistics |
+| `check_process_health` | Run health check command |
+| `get_system_stats` | Overall system resource usage |
+| **Logs** |  |
+| `get_logs` | Retrieve historical logs |
+| `tail_logs` | Stream recent logs |
+| `search_logs` | Full-text log search |
+| `clear_logs` | Remove old logs |
+| **Errors** |  |
+| `get_errors` | Retrieve error history |
+| `get_latest_errors` | Recent errors across all processes |
+| `mark_error_resolved` | Mark an error as resolved |
+| **Groups** |  |
+| `create_group` | Create a process group |
+| `add_to_group` | Add process to group |
+| `start_group` | Start all processes in group |
+| `stop_group` | Stop all processes in group |
+
+## Security
+
+### Command Validation
+- Only whitelisted command paths are allowed
+- Commands are validated against `PM_ALLOWED_COMMANDS`
+- No shell execution unless explicitly required
+
+### Resource Limits
+- CPU and memory limits enforced per process
+- Maximum process count enforced
+- Automatic cleanup of old data
+
+### Process Isolation
+- Each process runs in isolated child process
+- No shared state between processes
+- Signal handling prevents orphaned processes
+
+## Development
+
+### Building from Source
+
+\`\`\`bash
+# Clone the repository
+git clone https://github.com/your-org/process-manager-mcp.git
+cd process-manager-mcp
+
+# Install dependencies
+npm install
+
+# Run tests
+npm test
+
+# Build
+npm run build
+
+# Run in development mode
+npm run dev
+\`\`\`
+
+### Testing
+
+\`\`\`bash
+# Run all tests
+npm test
+
+# Run with coverage
+npm run test:coverage
+
+# Run specific test suites
+npm run test:unit
+npm run test:integration
+npm run test:e2e
+\`\`\`
+
+### Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
+
+## Troubleshooting
+
+### Common Issues
+
+**Process won't start**
+- Check if command is in allowed paths
+- Verify executable permissions
+- Check error logs with `get_errors` tool
+
+**High memory usage**
+- Check `PM_LOG_RETENTION_DAYS` setting
+- Run log cleanup with `clear_logs` tool
+- Verify `PM_MAX_PROCESSES` limit
+
+**Health checks failing**
+- Verify health check command is correct
+- Check if process is actually healthy
+- Review health check interval timing
+
+**Database locked errors**
+- Ensure only one server instance is running
+- Check file permissions on database path
+- Verify disk space availability
+
+## License
+
+MIT © Your Organization
+
+## Support
+
+- 📧 Email: support@your-org.com
+- 💬 Discord: [Join our server](https://discord.gg/your-server)
+- 🐛 Issues: [GitHub Issues](https://github.com/your-org/process-manager-mcp/issues)
+- 📖 Docs: [Full documentation](https://docs.your-org.com/process-manager-mcp)
+```
+
+## API Documentation
+
+### API Reference (docs/api.md)
+```markdown
+# Process Manager MCP API Reference
+
+## Tools API
+
+### start_process
+
+Starts a new managed process with the specified configuration.
+
+**Parameters:**
+- `name` (string, required): Human-readable process name
+- `command` (string, required): Executable command path
+- `args` (string[], optional): Command arguments
+- `env` (object, optional): Environment variables
+- `cwd` (string, optional): Working directory
+- `autoRestart` (boolean, optional): Auto-restart on failure
+- `healthCheckCommand` (string, optional): Health check command
+- `healthCheckInterval` (number, optional): Health check interval in ms
+- `groupId` (string, optional): Process group ID
+
+**Returns:**
+```json
+{
+  "id": "proc-abc123",
+  "name": "my-process",
+  "status": "running",
+  "pid": 12345,
+  "startedAt": 1234567890000
+}
+```
+
+### stop_process
+
+Stops a running process gracefully.
+
+**Parameters:**
+- `processId` (string, required): Process ID to stop
+- `force` (boolean, optional): Force kill if true
+
+**Returns:**
+```json
+{
+  "success": true,
+  "message": "Process stopped successfully"
+}
+```
+
+[Continue with all other tools...]
+
+## Resources API
+
+### processes://list
+
+Returns real-time list of all managed processes.
+
+**Response Format:**
+```json
+{
+  "summary": {
+    "total": 5,
+    "running": 3,
+    "stopped": 1,
+    "failed": 1
+  },
+  "processes": [
+    {
+      "id": "proc-abc123",
+      "name": "web-server",
+      "status": "running",
+      "currentCpu": 15.5,
+      "currentMemory": 104857600,
+      "uptime": 3600000
+    }
+  ]
+}
+```
+
+[Continue with all other resources...]
+
+## Prompts API
+
+### debug_process
+
+Interactive debugging assistant for failing processes.
+
+**Parameters:**
+- `processId` (string, required): ID of process to debug
+
+**Prompt Structure:**
+The prompt guides through:
+1. Process status check
+2. Log analysis
+3. Error investigation
+4. Performance metrics review
+5. Health check validation
+6. Historical pattern analysis
+
+[Continue with all other prompts...]
+
+## Error Codes
+
+| Code | Description | Resolution |
+|------|-------------|------------|
+| `ENOENT` | Command not found | Verify command path exists |
+| `EACCES` | Permission denied | Check file permissions |
+| `ENOMEM` | Out of memory | Increase memory limits |
+| `ENOSPC` | No disk space | Free up disk space |
+| `ETIMEDOUT` | Operation timeout | Check process responsiveness |
+
+## Rate Limits
+
+- Tool calls: No hard limit, throttled by system resources
+- Resource reads: 100 requests per minute
+- Log writes: 10,000 per second (buffered)
+- Metric collection: Every 10 seconds per process
+```
+
+## Usage Guide
+
+### Getting Started Guide (docs/getting-started.md)
+```markdown
+# Getting Started with Process Manager MCP
+
+## Quick Start
+
+### 1. Installation
+
+The fastest way to get started is via npm:
+
+```bash
+npm install -g @your-org/process-manager-mcp
+```
+
+### 2. Basic Configuration
+
+Create a `.env` file for configuration:
+
+```bash
+# .env
+PM_DATABASE_PATH=./data/processes.db
+PM_LOG_RETENTION_DAYS=7
+PM_MAX_PROCESSES=20
+```
+
+### 3. First Process
+
+Start your first managed process:
+
+```javascript
+// Using the MCP client
+const result = await mcp.callTool('start_process', {
+  name: 'hello-world',
+  command: 'echo',
+  args: ['Hello from Process Manager!']
+});
+
+console.log(`Started process: ${result.id}`);
+```
+
+## Common Use Cases
+
+### Web Development Stack
+
+Managing a typical web development environment:
+
+```javascript
+// 1. Create a development group
+const group = await mcp.callTool('create_group', {
+  name: 'dev-stack',
+  description: 'Local development environment'
+});
+
+// 2. Start database
+const db = await mcp.callTool('start_process', {
+  name: 'postgres',
+  command: 'postgres',
+  args: ['-D', '/usr/local/var/postgres'],
+  env: { PGPORT: '5432' },
+  healthCheckCommand: 'pg_isready',
+  healthCheckInterval: 10000
+});
+
+// 3. Start backend API
+const api = await mcp.callTool('start_process', {
+  name: 'api-server',
+  command: 'npm',
+  args: ['run', 'dev:api'],
+  cwd: './backend',
+  env: {
+    NODE_ENV: 'development',
+    DATABASE_URL: 'postgresql://localhost:5432/myapp'
+  },
+  autoRestart: true
+});
+
+// 4. Start frontend
+const frontend = await mcp.callTool('start_process', {
+  name: 'frontend',
+  command: 'npm',
+  args: ['run', 'dev'],
+  cwd: './frontend',
+  env: {
+    REACT_APP_API_URL: 'http://localhost:3000'
+  }
+});
+
+// 5. Add all to group
+await mcp.callTool('add_to_group', {
+  processId: db.id,
+  groupId: group.id
+});
+// ... add others
+```
+
+### Monitoring and Debugging
+
+Setting up comprehensive monitoring:
+
+```javascript
+// Get the optimize performance prompt
+const optimizePrompt = await mcp.callTool('prompts/get', {
+  name: 'optimize_performance'
+});
+
+// Monitor specific process
+const stats = await mcp.callTool('get_process_stats', {
+  processId: 'api-server-id',
+  duration: 3600000 // Last hour
+});
+
+// Set up alerts for high CPU usage
+if (stats.aggregated.avgCpu > 70) {
+  console.warn('High CPU usage detected:', stats.aggregated.avgCpu);
+}
+```
+
+### Log Analysis
+
+Searching and analyzing logs:
+
+```javascript
+// Search for errors
+const errors = await mcp.callTool('search_logs', {
+  query: 'ERROR',
+  processId: 'api-server-id',
+  limit: 100
+});
+
+// Tail logs in real-time
+const tail = await mcp.callTool('tail_logs', {
+  processId: 'api-server-id',
+  lines: 50,
+  follow: true
+});
+
+// Get error summary
+const errorSummary = await mcp.readResource('errors://latest');
+console.log('Unresolved errors:', errorSummary.summary.unresolved);
+```
+
+## Best Practices
+
+### 1. Process Naming
+Use descriptive, consistent names:
+- ✅ `api-server`, `postgres-db`, `redis-cache`
+- ❌ `process1`, `test`, `tmp`
+
+### 2. Health Checks
+Always configure health checks for critical services:
+```javascript
+{
+  healthCheckCommand: 'curl -f http://localhost:3000/health',
+  healthCheckInterval: 30000 // 30 seconds
+}
+```
+
+### 3. Resource Limits
+Set appropriate limits to prevent resource exhaustion:
+```javascript
+{
+  env: {
+    NODE_OPTIONS: '--max-old-space-size=512'
+  }
+}
+```
+
+### 4. Error Handling
+Use auto-restart for resilient services:
+```javascript
+{
+  autoRestart: true,
+  healthCheckCommand: 'nc -z localhost 3000'
+}
+```
+
+### 5. Group Organization
+Organize related processes into groups:
+- Development stack
+- Testing environment
+- Background workers
+- Monitoring tools
+
+## Troubleshooting
+
+### Process Won't Start
+
+1. Check allowed commands:
+```javascript
+const info = await mcp.callTool('get_process_info', {
+  processId: 'failed-process'
+});
+```
+
+2. Review error logs:
+```javascript
+const errors = await mcp.callTool('get_latest_errors', {
+  limit: 5
+});
+```
+
+### Memory Issues
+
+1. Check memory usage:
+```javascript
+const stats = await mcp.callTool('get_system_stats');
+console.log('Free memory:', stats.memoryFree);
+```
+
+2. Clear old logs:
+```javascript
+await mcp.callTool('clear_logs', {
+  processId: 'memory-heavy-process',
+  before: Date.now() - 86400000 // 24 hours ago
+});
+```
+
+## Next Steps
+
+- Explore the [API Reference](./api.md)
+- Review [Security Best Practices](./security.md)
+- Join our [Discord Community](https://discord.gg/your-server)
+```
+
+## Success Criteria
+
+### Documentation Checklist
+- [ ] Main README with all features documented
+- [ ] Installation instructions for all platforms
+- [ ] Configuration guide with all options
+- [ ] API reference for all tools/resources/prompts
+- [ ] Getting started guide with examples
+- [ ] Troubleshooting section
+- [ ] Security documentation
+- [ ] Contributing guidelines
+
+### User Experience
+- [ ] Clear installation path
+- [ ] Working examples for common use cases
+- [ ] Error resolution guidance
+- [ ] Performance optimization tips
+- [ ] Migration guide from other solutions
+
+## Dependencies
+- All implementation tasks complete (0001-0008)
+- Working examples tested
+- API documentation verified
+- Installation tested on all platforms
+
+## Next Steps
+After documentation:
+1. Implement security hardening (Task 0010)
+2. Add performance optimizations (Task 0011)
+3. Create video tutorials and demos
