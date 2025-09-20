@@ -1,4 +1,7 @@
-// Placeholder tool registration - to be implemented in Task 0002
-export function registerTools(_server: any, _processManager: any, _database: any, _logger: any): void {
-  // TODO: Register all tools
+import winston from 'winston';
+import { ProcessManager } from '../process/manager.js';
+import { registerLifecycleTools } from './lifecycle.js';
+
+export function registerTools(processManager: ProcessManager, logger: winston.Logger): void {
+  registerLifecycleTools(processManager, logger);
 }
