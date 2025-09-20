@@ -9,6 +9,7 @@ import { ProcessManager } from './process/manager.js';
 import { StatsCollector } from './monitoring/collector.js';
 import { HealthCheckService } from './monitoring/health.js';
 import { LogManager } from './logs/manager.js';
+import { ErrorManager } from './errors/manager.js';
 import { registerTools } from './tools/index.js';
 import { getToolsList, callTool } from './tools/registry.js';
 // import { registerResources } from './resources/index.js';
@@ -54,6 +55,9 @@ async function main() {
     // Initialize log manager
     const logManager = new LogManager(database, logger);
 
+    // Initialize error manager
+    const errorManager = new ErrorManager(database, logger);
+
     // Initialize process manager
     const processManager = new ProcessManager(database, logger, config, logManager);
 
@@ -79,7 +83,7 @@ async function main() {
       }
     );
 
-    registerTools(processManager, statsCollector, healthCheckService, logManager, logger);
+    registerTools(processManager, statsCollector, healthCheckService, logManager, errorManager, logger);
 
     // Set up tool handlers
     server.setRequestHandler(ToolsListRequest, async () => {
