@@ -10,6 +10,7 @@ import { StatsCollector } from './monitoring/collector.js';
 import { HealthCheckService } from './monitoring/health.js';
 import { LogManager } from './logs/manager.js';
 import { ErrorManager } from './errors/manager.js';
+import { GroupManager } from './groups/manager.js';
 import { registerTools } from './tools/index.js';
 import { getToolsList, callTool } from './tools/registry.js';
 // import { registerResources } from './resources/index.js';
@@ -61,6 +62,9 @@ async function main() {
     // Initialize process manager
     const processManager = new ProcessManager(database, logger, config, logManager);
 
+    // Initialize group manager
+    const groupManager = new GroupManager(database, processManager, logger);
+
     // Initialize monitoring services
     const statsCollector = new StatsCollector(database, processManager, logger);
     const healthCheckService = new HealthCheckService(processManager, database, logger, config.get('PM_ALLOWED_COMMANDS'));
@@ -83,7 +87,7 @@ async function main() {
       }
     );
 
-    registerTools(processManager, statsCollector, healthCheckService, logManager, errorManager, logger);
+    registerTools(processManager, statsCollector, healthCheckService, logManager, errorManager, groupManager, logger);
 
     // Set up tool handlers
     server.setRequestHandler(ToolsListRequest, async () => {

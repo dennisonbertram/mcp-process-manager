@@ -60,49 +60,79 @@ export class ProcessManager extends EventEmitter {
 
     const processId = config.id || nanoid();
 
+    let managedProcess: ManagedProcess;
+
     // Check if process already exists
     if (this.processes.has(processId)) {
-      const existing = this.processes.get(processId)!;
-      if (existing.status === ProcessStatus.RUNNING) {
+      managedProcess = this.processes.get(processId)!;
+      if (managedProcess.status === ProcessStatus.RUNNING) {
         throw new Error(`Process ${processId} is already running`);
       }
-    }
 
-    // Create process info
-    const processInfo: ProcessInfo = {
-      id: processId,
-      name: config.name,
-      command: config.command,
-      args: config.args || [],
-      env: config.env || {},
-      cwd: config.cwd || process.cwd(),
-      autoRestart: config.autoRestart || false,
-      healthCheckCommand: config.healthCheckCommand,
-      healthCheckInterval: config.healthCheckInterval,
-      groupId: config.groupId,
-      status: ProcessStatus.STARTING,
-      createdAt: Date.now(),
-      restartCount: 0,
-      healthStatus: HealthStatus.UNKNOWN
-    };
+      // Update existing process info
+      const existingInfo = managedProcess.getInfo();
+      const updatedInfo: ProcessInfo = {
+        ...existingInfo,
+        name: config.name,
+        command: config.command,
+        args: config.args || [],
+        env: config.env || {},
+        cwd: config.cwd || process.cwd(),
+        autoRestart: config.autoRestart || false,
+        healthCheckCommand: config.healthCheckCommand,
+        healthCheckInterval: config.healthCheckInterval,
+        groupId: config.groupId,
+        status: ProcessStatus.STARTING,
+        restartCount: existingInfo.restartCount
+      };
 
-    // Store in database
-    this.database.transaction(() => {
-      this.database.getStatement('insertProcess').run({
-        id: processInfo.id,
-        name: processInfo.name,
-        command: processInfo.command,
-        args: JSON.stringify(processInfo.args),
-        env: JSON.stringify(processInfo.env),
-        cwd: processInfo.cwd,
-        status: processInfo.status,
-        created_at: processInfo.createdAt
+      // Update database
+      this.database.getStatement('updateProcessStatus').run({
+        id: processId,
+        status: ProcessStatus.STARTING,
+        pid: null,
+        started_at: null
       });
-    });
 
-    // Create managed process
-    const managedProcess = new ManagedProcess(processInfo, this.database, this.logger, this.logManager);
-    this.processes.set(processId, managedProcess);
+      // Update managed process info
+      managedProcess.updateInfo(updatedInfo);
+    } else {
+      // Create new process info
+      const processInfo: ProcessInfo = {
+        id: processId,
+        name: config.name,
+        command: config.command,
+        args: config.args || [],
+        env: config.env || {},
+        cwd: config.cwd || process.cwd(),
+        autoRestart: config.autoRestart || false,
+        healthCheckCommand: config.healthCheckCommand,
+        healthCheckInterval: config.healthCheckInterval,
+        groupId: config.groupId,
+        status: ProcessStatus.STARTING,
+        createdAt: Date.now(),
+        restartCount: 0,
+        healthStatus: HealthStatus.UNKNOWN
+      };
+
+      // Store in database
+      this.database.transaction(() => {
+        this.database.getStatement('insertProcess').run({
+          id: processInfo.id,
+          name: processInfo.name,
+          command: processInfo.command,
+          args: JSON.stringify(processInfo.args),
+          env: JSON.stringify(processInfo.env),
+          cwd: processInfo.cwd,
+          status: processInfo.status,
+          created_at: processInfo.createdAt
+        });
+      });
+
+      // Create managed process
+      managedProcess = new ManagedProcess(processInfo, this.database, this.logger, this.logManager);
+      this.processes.set(processId, managedProcess);
+    }
 
     // Start the actual process
     try {
@@ -113,7 +143,7 @@ export class ProcessManager extends EventEmitter {
         this.setupHealthCheck(processId);
       }
 
-      this.emit('processStarted', processInfo);
+      this.emit('processStarted', managedProcess.getInfo());
       return managedProcess.getInfo();
     } catch (error) {
       managedProcess.status = ProcessStatus.FAILED;
@@ -195,6 +225,13 @@ export class ProcessManager extends EventEmitter {
     }
 
     return processes;
+  }
+
+  updateProcessGroupId(processId: string, groupId: string | null): void {
+    const managedProcess = this.processes.get(processId);
+    if (managedProcess) {
+      managedProcess.updateGroupId(groupId);
+    }
   }
 
   private setupHealthCheck(processId: string): void {
@@ -453,4 +490,12 @@ class ManagedProcess {
 
   get restartCount(): number { return this.info.restartCount; }
   set restartCount(value: number) { this.info.restartCount = value; }
+
+  updateGroupId(groupId: string | null): void {
+    this.info.groupId = groupId || undefined;
+  }
+
+  updateInfo(newInfo: ProcessInfo): void {
+    this.info = { ...newInfo };
+  }
 }
