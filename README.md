@@ -135,7 +135,7 @@ const group = await mcp.callTool('create_group', {
 | `PM_DATABASE_PATH` | `~/.mcp-process-manager/data/process-manager.db` | SQLite database file path |
 | `PM_LOG_LEVEL` | `info` | Logging level (error, warn, info, debug) |
 | `PM_MAX_PROCESSES` | `50` | Maximum number of concurrent processes |
-| `PM_ALLOWED_COMMANDS` | `/usr/bin,/usr/local/bin` | Allowed command paths (comma-separated) |
+| `PM_ALLOWED_COMMANDS` | `/usr/bin,/usr/local/bin` | Comma-separated files/dirs; supports `pwd`, `~`; empty string = allow all |
 | `PM_AUTO_RESTART_ENABLED` | `true` | Enable automatic process restart |
 | `PM_LOG_RETENTION_DAYS` | `30` | Log retention period in days |
 | `PM_MAX_LOG_SIZE_MB` | `100` | Maximum log file size in MB |
@@ -143,16 +143,48 @@ const group = await mcp.callTool('create_group', {
 | `PM_MAX_MEMORY_MB` | `1024` | Memory usage threshold for alerts |
 | `PM_HEALTH_CHECK_INTERVAL` | `60000` | Health check interval in milliseconds |
 
-### Command Path Security
+### Allowed Commands (Security)
 
-The server validates all commands against the `PM_ALLOWED_COMMANDS` list to prevent security vulnerabilities:
+Commands are validated against `PM_ALLOWED_COMMANDS` to prevent executing unexpected binaries.
 
+Rules:
+- Entries may be absolute directories or files; symlinks are resolved.
+- A command is allowed if its realpath is exactly an allowed file or a subpath of an allowed directory.
+- Special tokens: `pwd`, `$PWD`, `${PWD}`, `{PWD}` expand to the current working directory; `~` expands to your home.
+- Empty value means allow all commands (not recommended).
+
+Examples:
 ```bash
-# Allow specific directories
-export PM_ALLOWED_COMMANDS="/usr/bin,/bin,/usr/local/bin,/opt/node/bin"
+# Allow common system bins
+export PM_ALLOWED_COMMANDS="/usr/bin,/usr/local/bin"
 
-# Allow specific commands
-export PM_ALLOWED_COMMANDS="/usr/bin/node,/usr/bin/npm,/bin/bash"
+# Allow current workspace and system bins
+export PM_ALLOWED_COMMANDS="pwd,/usr/bin,/usr/local/bin"
+
+# Allow only current workspace
+export PM_ALLOWED_COMMANDS="pwd"
+
+# Allow specific files only
+export PM_ALLOWED_COMMANDS="/usr/bin/node,/bin/bash"
+
+# Allow everything (not recommended)
+export PM_ALLOWED_COMMANDS=""
+```
+
+Cursor settings.json example:
+```json
+{
+  "mcpServers": {
+    "process-manager": {
+      "command": "node",
+      "args": ["/abs/path/to/mcp-process-manager/dist/index.js"],
+      "env": {
+        "PM_ALLOWED_COMMANDS": "pwd,/usr/bin,/usr/local/bin",
+        "PM_LOG_LEVEL": "info"
+      }
+    }
+  }
+}
 ```
 
 ## 📖 Usage
