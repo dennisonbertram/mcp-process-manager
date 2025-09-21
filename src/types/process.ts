@@ -31,7 +31,9 @@ export interface ProcessConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
-  cwd?: string;
+  envFiles?: string[];      // New: merge env from files (left→right)
+  envProfile?: string;      // New: profile name to expand default file order
+  cwd?: string;             // accepts absolute path or "pwd"
   autoRestart?: boolean;
   healthCheckCommand?: string;
   healthCheckInterval?: number;

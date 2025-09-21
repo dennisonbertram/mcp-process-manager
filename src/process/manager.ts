@@ -2,6 +2,7 @@ import { ChildProcess, spawn } from 'child_process';
 import { nanoid } from 'nanoid';
 import winston from 'winston';
 import { DatabaseManager } from '../database/manager.js';
+import { loadEnvFiles } from '../utils/env.js';
 import { ConfigManager } from '../config/manager.js';
 import { LogManager } from '../logs/manager.js';
 import { ProcessConfig, ProcessInfo, ProcessStatus, HealthStatus, LogType, LogLevel } from '../types/process.js';
@@ -48,8 +49,13 @@ export class ProcessManager extends EventEmitter {
   }
 
   async startProcess(config: ProcessConfig): Promise<ProcessInfo> {
-    // Validate command path
-    if (!this.config.isCommandAllowed(config.command)) {
+    // Resolve tool name via allowlist if needed, then validate
+    let resolvedCommand = config.command;
+    if (!resolvedCommand.includes('/') && !resolvedCommand.includes('\\')) {
+      const viaTool = this.config.resolveAllowedTool(resolvedCommand);
+      if (viaTool) resolvedCommand = viaTool;
+    }
+    if (!this.config.isCommandAllowed(resolvedCommand)) {
       throw new Error(`Command not allowed: ${config.command}`);
     }
 
@@ -61,6 +67,17 @@ export class ProcessManager extends EventEmitter {
     const processId = config.id || nanoid();
 
     let managedProcess: ManagedProcess;
+
+    // Merge env from files/profile
+    const baseCwd = config.cwd === 'pwd' ? process.cwd() : (config.cwd || process.cwd());
+    let mergedEnv: Record<string,string> = { ...(config.env || {}) };
+    const profile = (config.envProfile || '').trim();
+    const filesFromProfile = profile ? [`.env`, `.env.local`, `.env.${profile}`, `.env.${profile}.local`] : [];
+    const envFiles = [...(config.envFiles || []), ...filesFromProfile];
+    if (envFiles.length) {
+      const loaded = loadEnvFiles(baseCwd, envFiles);
+      mergedEnv = { ...loaded, ...mergedEnv };
+    }
 
     // Check if process already exists
     if (this.processes.has(processId)) {
@@ -74,10 +91,10 @@ export class ProcessManager extends EventEmitter {
       const updatedInfo: ProcessInfo = {
         ...existingInfo,
         name: config.name,
-        command: config.command,
+        command: resolvedCommand,
         args: config.args || [],
         env: config.env || {},
-        cwd: config.cwd || process.cwd(),
+        cwd: config.cwd === 'pwd' ? process.cwd() : (config.cwd || process.cwd()),
         autoRestart: config.autoRestart || false,
         healthCheckCommand: config.healthCheckCommand,
         healthCheckInterval: config.healthCheckInterval,
@@ -101,10 +118,10 @@ export class ProcessManager extends EventEmitter {
       const processInfo: ProcessInfo = {
         id: processId,
         name: config.name,
-        command: config.command,
+        command: resolvedCommand,
         args: config.args || [],
         env: config.env || {},
-        cwd: config.cwd || process.cwd(),
+        cwd: config.cwd === 'pwd' ? process.cwd() : (config.cwd || process.cwd()),
         autoRestart: config.autoRestart || false,
         healthCheckCommand: config.healthCheckCommand,
         healthCheckInterval: config.healthCheckInterval,
@@ -261,8 +278,12 @@ export class ProcessManager extends EventEmitter {
 
     try {
       const parts = info.healthCheckCommand.trim().split(/\s+/);
-      const cmd = parts[0];
+      let cmd = parts[0];
       const args = parts.slice(1);
+      if (!cmd.includes('/') && !cmd.includes('\\')) {
+        const viaTool = this.config.resolveAllowedTool(cmd);
+        if (viaTool) cmd = viaTool;
+      }
       if (!this.config.isCommandAllowed(cmd)) {
         throw new Error(`Health check command not allowed: ${cmd}`);
       }

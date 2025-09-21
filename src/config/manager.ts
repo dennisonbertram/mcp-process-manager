@@ -11,6 +11,7 @@ const ConfigSchema = z.object({
   PM_AUTO_RESTART_ENABLED: z.boolean().default(true),
   PM_LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
   PM_ALLOWED_COMMANDS: z.string().transform(val => val.split(',')).default('/usr/bin,/usr/local/bin'),
+  PM_ALLOWED_TOOL_NAMES: z.string().transform(val => val.split(',')).default(''),
   PM_MAX_LOG_SIZE_MB: z.number().min(1).max(10000).default(100),
   PM_MAX_CPU_PERCENT: z.number().min(1).max(100).default(80),
   PM_MAX_MEMORY_MB: z.number().min(1).max(32000).default(1024),
@@ -94,6 +95,26 @@ export class ConfigManager {
     } catch {
       return false;
     }
+  }
+
+  // Resolve bare tool name via PATH if allowed in PM_ALLOWED_TOOL_NAMES; returns absolute path or null
+  resolveAllowedTool(command: string): string | null {
+    // If already absolute or relative path, return as-is
+    if (command.includes('/') || command.includes('\\')) return command;
+    const names = (this.config.PM_ALLOWED_TOOL_NAMES || []).map((s) => s.trim()).filter(Boolean);
+    if (!names.length) return null;
+    if (!names.includes(command)) return null;
+    const pathEnv = process.env.PATH || '';
+    const sep = process.platform === 'win32' ? ';' : ':';
+    for (const dir of pathEnv.split(sep)) {
+      try {
+        const candidate = fs.realpathSync(path.join(dir, command));
+        if (fs.existsSync(candidate) && this.isCommandAllowed(candidate)) {
+          return candidate;
+        }
+      } catch { /* ignore */ }
+    }
+    return null;
   }
 
   getAll(): Config {

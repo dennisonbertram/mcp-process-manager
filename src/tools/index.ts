@@ -10,6 +10,8 @@ import { registerMonitoringTools } from './monitoring.js';
 import { registerLogTools } from './logs.js';
 import { registerErrorTools } from './errors.js';
 import { registerGroupTools } from './groups.js';
+import { registerTemplateTools } from './templates.js';
+import { registerAdvisorTools } from './advisor.js';
 
 export function registerTools(
   processManager: ProcessManager,
@@ -25,4 +27,6 @@ export function registerTools(
   registerLogTools(logManager, logger);
   registerErrorTools(errorManager, logger);
   registerGroupTools(groupManager, logger);
+  registerTemplateTools(logger);
+  registerAdvisorTools(logger);
 }
