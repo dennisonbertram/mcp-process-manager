@@ -39,6 +39,8 @@ A comprehensive Model Context Protocol (MCP) server for advanced process managem
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Usage](#usage)
+- [Templates & Advisor](#templates--advisor)
+- [Config Files](#config-files)
 - [API Reference](#api-reference)
 - [Docker](#docker)
 - [Development](#development)
@@ -290,6 +292,31 @@ if (health.status === 'unhealthy') {
   console.log(`Process unhealthy: ${health.message}`);
 }
 ```
+
+## Templates & Advisor
+
+- List templates
+  - call tool `templates/list` (optional: `{ "category": "backend" }`)
+- Apply a template (dry-run)
+  - call tool `templates/apply` with `{ "name": "fullstack-dev" }`
+  - returns a ProcessesConfig JSON you can save to `processes.config.json`
+- Analyze project (dry-run suggestions)
+  - call tool `advisor/analyze_project` (optional: `{ "path": "/abs/project" }`)
+  - returns suggested processes/groups
+- Start dev stack
+  - call tool `start_dev_stack` (defaults to group `dev`)
+
+## Config Files
+
+- File: `processes.config.json`
+- Schema:
+  - processes: map of name → { command, args?, cwd?, env?, envFiles?, envProfile?, autoRestart?, healthCheckCommand?, healthCheckInterval? }
+  - groups: map of groupName → string[]
+- Load/validate:
+  - call tool `config/read` (optional: `{ "path": "processes.config.json" }`)
+- Apply desired state:
+  - call tool `config/reload` with `{ "dryRun": true }` to preview actions
+  - set `{ "dryRun": false }` to start defined processes (and optional `{ "group": "dev" }`)
 
 ### Log Management
 

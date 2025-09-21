@@ -29,6 +29,18 @@ const TEMPLATES = [
     title: 'Fullstack Dev (frontend + backend + infra)',
     description: 'Frontend dev server, backend worker, and optional docker-compose infra',
     categories: ['frontend','backend','infra']
+  },
+  {
+    name: 'go-service',
+    title: 'Go Service (API + worker)',
+    description: 'Go HTTP server and a background worker',
+    categories: ['backend']
+  },
+  {
+    name: 'python-ml',
+    title: 'Python ML Service',
+    description: 'FastAPI + model worker',
+    categories: ['backend']
   }
 ];
 
@@ -82,6 +94,24 @@ export function registerTemplateTools(logger: winston.Logger) {
               infra: { command: 'docker', args: ['compose', 'up'], cwd: 'pwd' }
             },
             groups: { dev: ['infra','backend','frontend'] }
+          };
+          break;
+        case 'go-service':
+          config = {
+            processes: {
+              api: { command: 'go', args: ['run', './cmd/api/main.go'], envFiles: ['.env'] },
+              worker: { command: 'go', args: ['run', './cmd/worker/main.go'], envFiles: ['.env'] }
+            },
+            groups: { dev: ['api','worker'] }
+          };
+          break;
+        case 'python-ml':
+          config = {
+            processes: {
+              api: { command: 'uvicorn', args: ['app:app', '--reload'], envFiles: ['.env'] },
+              worker: { command: 'python', args: ['worker.py'] }
+            },
+            groups: { dev: ['api','worker'] }
           };
           break;
         default:
