@@ -15,6 +15,7 @@ import { registerAdvisorTools } from './advisor.js';
 import { registerConfigTools } from './config.js';
 import { registerDevStackTools } from './devstack.js';
 import { registerAnalysisTools } from './analyze.js';
+import { registerReloadTools } from './reload.js';
 
 export function registerTools(
   processManager: ProcessManager,
@@ -35,4 +36,5 @@ export function registerTools(
   registerConfigTools(logger);
   registerDevStackTools(processManager, groupManager, logger);
   registerAnalysisTools(logManager, healthCheckService, logger);
+  registerReloadTools(processManager, groupManager, logger);
 }

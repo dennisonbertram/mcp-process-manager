@@ -23,6 +23,12 @@ const TEMPLATES = [
     title: 'Python Service (uvicorn + worker)',
     description: 'API with uvicorn and background worker',
     categories: ['backend']
+  },
+  {
+    name: 'fullstack-dev',
+    title: 'Fullstack Dev (frontend + backend + infra)',
+    description: 'Frontend dev server, backend worker, and optional docker-compose infra',
+    categories: ['frontend','backend','infra']
   }
 ];
 
@@ -66,6 +72,16 @@ export function registerTemplateTools(logger: winston.Logger) {
               worker: { command: 'python', args: ['worker.py'] }
             },
             groups: { dev: ['api', 'worker'] }
+          };
+          break;
+        case 'fullstack-dev':
+          config = {
+            processes: {
+              frontend: { command: 'pnpm', args: ['dev'], envFiles: ['.env.local', '.env'] },
+              backend: { command: 'pnpm', args: ['worker:dev'], envFiles: ['.env.local', '.env'] },
+              infra: { command: 'docker', args: ['compose', 'up'], cwd: 'pwd' }
+            },
+            groups: { dev: ['infra','backend','frontend'] }
           };
           break;
         default:
