@@ -47,17 +47,33 @@ export function registerTemplateTools(logger: winston.Logger) {
     description: 'Apply a template to produce a processes config (dry-run)',
     schema: ApplyTemplateSchema,
     handler: async (args: any) => {
-      // For now, return a minimal example config; no execution
-      const config = {
-        processes: {
-          web: { command: 'node', args: ['server.js'], envFiles: ['.env'] },
-          worker: { command: 'node', args: ['worker.js'], envFiles: ['.env'] }
-        },
-        groups: { dev: ['web', 'worker'] }
-      };
+      const name = args.name;
+      let config: any;
+      switch (name) {
+        case 'node-service':
+          config = {
+            processes: {
+              web: { command: 'node', args: ['server.js'], envFiles: ['.env'] },
+              worker: { command: 'node', args: ['worker.js'], envFiles: ['.env'] }
+            },
+            groups: { dev: ['web', 'worker'] }
+          };
+          break;
+        case 'python-service':
+          config = {
+            processes: {
+              api: { command: 'uvicorn', args: ['app:app', '--reload'], envFiles: ['.env'] },
+              worker: { command: 'python', args: ['worker.py'] }
+            },
+            groups: { dev: ['api', 'worker'] }
+          };
+          break;
+        default:
+          config = { processes: {}, groups: {} };
+      }
       return {
         content: [
-          { type: 'text', text: `Applied template '${args.name}' (dry-run)` },
+          { type: 'text', text: `Applied template '${name}' (dry-run)` },
           { type: 'text', text: JSON.stringify({ config }, null, 2) }
         ]
       };
