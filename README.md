@@ -79,6 +79,22 @@ npm run build
 npm test
 ```
 
+## 🍳 Quick Recipes for LLMs
+
+- Create a dev config from a template (dry-run):
+  - call `templates/apply` with `{ "name": "fullstack-dev" }` → save JSON to `processes.config.json`
+- Validate the config:
+  - call `config/read` (no args) → check `issues` array is empty
+- Preview what will happen:
+  - call `config/reload` with `{ "dryRun": true, "group": "dev" }`
+- Start the stack:
+  - call `config/reload` with `{ "dryRun": false, "group": "dev" }`
+- Inspect health and logs:
+  - call `check_health_summary` (no args)
+  - call `analyze_logs` with `{ "limit": 500 }`
+- Add a single process with env files:
+  - call `start_process` with `{ "name":"api", "command":"pnpm", "args":["dev"], "envFiles":[".env.local",".env"], "cwd":"pwd" }`
+
 ## 🚀 Quick Start
 
 ### Basic Usage
