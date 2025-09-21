@@ -363,6 +363,38 @@ await mcp.callTool('resolve_error', {
 
 ## 🔧 API Reference
 
+LLM usage guidance: use these tools to perform concrete actions. Every tool returns a human-readable summary and a JSON block for programmatic follow-ups.
+
+- start_process: Starts a process. Use when you need to run a command (supports envFiles/envProfile and cwd="pwd").
+- stop_process: Stops a process. Use to gracefully stop by id (force optional).
+- restart_process: Restarts a process. Use to apply a new config or recover.
+- kill_process: Kills a process. Use only when stop fails.
+- list_processes: Lists processes. Use before selecting a target id.
+- get_process_info: Shows detailed info + latest metric. Use for status snapshots.
+- get_process_stats: Aggregates metrics over a duration. Use to analyze performance.
+- check_process_health: Runs health check. Use to validate service is healthy.
+- get_system_stats: System usage snapshot. Use to understand system load.
+- get_logs: Retrieve logs. Use with processId and filters.
+- tail_logs: Tail logs. Use with follow for streaming in clients that support it.
+- search_logs: Search text in logs. Use to find errors or specific patterns.
+- clear_logs: Delete logs. Use for cleanup (with care).
+- get_errors: List errors. Use to investigate failures.
+- get_latest_errors: Latest unresolved errors. Use to prioritize fixes.
+- mark_error_resolved: Mark error as resolved. Use after remediation.
+- create_group: Create process group. Use to orchestrate multiple processes.
+- add_to_group: Add process to group. Use to build orchestration.
+- start_group: Start all processes in a group. Use with startupDelay/skipRunning.
+- stop_group: Stop all processes in a group. Use with strategy.
+- get_group_status: Group health/summary. Use for orchestration visibility.
+- templates/list: Discover available templates. Use to explore presets.
+- templates/apply: Get a ProcessesConfig for a template. Use to generate config.
+- advisor/analyze_project: Suggest processes/groups. Use to bootstrap config.
+- config/read: Load and validate a config file. Use before applying.
+- config/reload: Apply desired state (dryRun by default). Use to materialize config.
+- start_dev_stack: Start the dev group from config. Use for one-command startup.
+- analyze_logs: Summarize errors/warnings. Use to triage issues.
+- check_health_summary: Health summary across processes. Use to check overall health.
+
 ### Process Management Tools
 
 | Tool | Description | Parameters |
