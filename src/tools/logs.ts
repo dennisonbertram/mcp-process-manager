@@ -55,10 +55,16 @@ export function registerLogTools(
         ).join('\n');
 
         return {
-          content: [{
-            type: 'text',
-            text: `${summary}\n\nRecent logs:\n${formatted}${logs.length > 10 ? `\n... and ${logs.length - 10} more` : ''}`
-          }]
+          content: [
+            {
+              type: 'text',
+              text: `${summary}\n\nRecent logs:\n${formatted}${logs.length > 10 ? `\n... and ${logs.length - 10} more` : ''}`
+            },
+            {
+              type: 'text',
+              text: JSON.stringify({ logs }, null, 2)
+            }
+          ]
         };
       } catch (error) {
         logger.error('Failed to get logs:', error);
@@ -86,10 +92,16 @@ export function registerLogTools(
         ).join('\n');
 
         return {
-          content: [{
-            type: 'text',
-            text: `Showing last ${logs.length} log entries${args.processId ? ` for process ${args.processId}` : ''}${args.follow ? ' (following for new logs)' : ''}\n\n${formatted}`
-          }]
+          content: [
+            {
+              type: 'text',
+              text: `Showing last ${logs.length} log entries${args.processId ? ` for process ${args.processId}` : ''}${args.follow ? ' (following for new logs)' : ''}\n\n${formatted}`
+            },
+            {
+              type: 'text',
+              text: JSON.stringify({ logs, subscriptionId: (logs as any).__subscriptionId || null }, null, 2)
+            }
+          ]
         };
       } catch (error) {
         logger.error('Failed to tail logs:', error);
@@ -130,10 +142,16 @@ export function registerLogTools(
         }).join('\n');
 
         return {
-          content: [{
-            type: 'text',
-            text: `${summary}\n\n${formatted}${logs.length > 10 ? `\n... and ${logs.length - 10} more matches` : ''}`
-          }]
+          content: [
+            {
+              type: 'text',
+              text: `${summary}\n\n${formatted}${logs.length > 10 ? `\n... and ${logs.length - 10} more matches` : ''}`
+            },
+            {
+              type: 'text',
+              text: JSON.stringify({ query: args.query, logs }, null, 2)
+            }
+          ]
         };
       } catch (error) {
         logger.error('Failed to search logs:', error);
@@ -161,10 +179,16 @@ export function registerLogTools(
           : `Cleared ${deletedCount} logs for process ${args.processId}`;
 
         return {
-          content: [{
-            type: 'text',
-            text: message
-          }]
+          content: [
+            {
+              type: 'text',
+              text: message
+            },
+            {
+              type: 'text',
+              text: JSON.stringify({ processId: args.processId, deletedCount, before: args.before || null }, null, 2)
+            }
+          ]
         };
       } catch (error) {
         logger.error('Failed to clear logs:', error);

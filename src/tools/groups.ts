@@ -44,10 +44,16 @@ export function registerGroupTools(
         const group = await groupManager.createGroup(args);
 
         return {
-          content: [{
-            type: 'text',
-            text: `Created process group "${group.name}" with ID: ${group.id}`
-          }]
+          content: [
+            {
+              type: 'text',
+              text: `Created process group "${group.name}" with ID: ${group.id}`
+            },
+            {
+              type: 'text',
+              text: JSON.stringify({ group }, null, 2)
+            }
+          ]
         };
       } catch (error) {
         logger.error('Failed to create group:', error);
@@ -71,10 +77,16 @@ export function registerGroupTools(
         await groupManager.addToGroup(args.processId, args.groupId);
 
         return {
-          content: [{
-            type: 'text',
-            text: `Added process ${args.processId} to group ${args.groupId}`
-          }]
+          content: [
+            {
+              type: 'text',
+              text: `Added process ${args.processId} to group ${args.groupId}`
+            },
+            {
+              type: 'text',
+              text: JSON.stringify({ processId: args.processId, groupId: args.groupId }, null, 2)
+            }
+          ]
         };
       } catch (error) {
         logger.error('Failed to add to group:', error);
@@ -103,10 +115,16 @@ export function registerGroupTools(
         const status = await groupManager.getGroupStatus(args.groupId);
 
         return {
-          content: [{
-            type: 'text',
-            text: `Started group ${args.groupId}: ${processes.length} processes\nRunning: ${status.runningCount}, Failed: ${status.failedCount}`
-          }]
+          content: [
+            {
+              type: 'text',
+              text: `Started group ${args.groupId}: ${processes.length} processes\nRunning: ${status.runningCount}, Failed: ${status.failedCount}`
+            },
+            {
+              type: 'text',
+              text: JSON.stringify({ groupId: args.groupId, processes, status }, null, 2)
+            }
+          ]
         };
       } catch (error) {
         logger.error('Failed to start group:', error);
@@ -133,10 +151,16 @@ export function registerGroupTools(
         });
 
         return {
-          content: [{
-            type: 'text',
-            text: `Stopped all processes in group ${args.groupId}`
-          }]
+          content: [
+            {
+              type: 'text',
+              text: `Stopped all processes in group ${args.groupId}`
+            },
+            {
+              type: 'text',
+              text: JSON.stringify({ groupId: args.groupId, action: 'stopped', stopStrategy: args.stopStrategy || 'reverse', force: !!args.force }, null, 2)
+            }
+          ]
         };
       } catch (error) {
         logger.error('Failed to stop group:', error);
@@ -160,10 +184,16 @@ export function registerGroupTools(
         const status = await groupManager.getGroupStatus(args.groupId);
 
         return {
-          content: [{
-            type: 'text',
-            text: `Group ${args.groupId} status:\n${status.processes.length} processes\n${status.runningCount} running\n${status.stoppedCount} stopped\n${status.failedCount} failed`
-          }]
+          content: [
+            {
+              type: 'text',
+              text: `Group ${args.groupId} status:\n${status.processes.length} processes\n${status.runningCount} running\n${status.stoppedCount} stopped\n${status.failedCount} failed`
+            },
+            {
+              type: 'text',
+              text: JSON.stringify({ groupId: args.groupId, status }, null, 2)
+            }
+          ]
         };
       } catch (error) {
         logger.error('Failed to get group status:', error);

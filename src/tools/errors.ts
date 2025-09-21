@@ -45,10 +45,16 @@ export function registerErrorTools(
         ).join('\n');
 
         return {
-          content: [{
-            type: 'text',
-            text: `Found ${errors.length} errors (${summary.unresolvedErrors} unresolved)\n\nRecent errors:\n${formatted}${errors.length > 5 ? `\n... and ${errors.length - 5} more` : ''}\n\nError rate: ${summary.errorRate.toFixed(2)} errors/hour`
-          }]
+          content: [
+            {
+              type: 'text',
+              text: `Found ${errors.length} errors (${summary.unresolvedErrors} unresolved)\n\nRecent errors:\n${formatted}${errors.length > 5 ? `\n... and ${errors.length - 5} more` : ''}\n\nError rate: ${summary.errorRate.toFixed(2)} errors/hour`
+            },
+            {
+              type: 'text',
+              text: JSON.stringify({ errors, summary }, null, 2)
+            }
+          ]
         };
       } catch (error) {
         logger.error('Failed to get errors:', error);
@@ -76,10 +82,16 @@ export function registerErrorTools(
         ).join('\n');
 
         return {
-          content: [{
-            type: 'text',
-            text: `Latest ${args.unresolvedOnly ? 'unresolved ' : ''}errors (${errors.length}):\n\n${formatted || 'No errors found'}`
-          }]
+          content: [
+            {
+              type: 'text',
+              text: `Latest ${args.unresolvedOnly ? 'unresolved ' : ''}errors (${errors.length}):\n\n${formatted || 'No errors found'}`
+            },
+            {
+              type: 'text',
+              text: JSON.stringify({ errors }, null, 2)
+            }
+          ]
         };
       } catch (error) {
         logger.error('Failed to get latest errors:', error);
@@ -103,10 +115,16 @@ export function registerErrorTools(
         await errorManager.markErrorResolved(args.errorId, args.resolution);
 
         return {
-          content: [{
-            type: 'text',
-            text: `Marked error ${args.errorId} as resolved${args.resolution ? `: ${args.resolution}` : ''}`
-          }]
+          content: [
+            {
+              type: 'text',
+              text: `Marked error ${args.errorId} as resolved${args.resolution ? `: ${args.resolution}` : ''}`
+            },
+            {
+              type: 'text',
+              text: JSON.stringify({ errorId: args.errorId, resolution: args.resolution || null }, null, 2)
+            }
+          ]
         };
       } catch (error) {
         logger.error('Failed to mark error resolved:', error);
