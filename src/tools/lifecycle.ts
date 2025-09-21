@@ -52,7 +52,10 @@ export function registerLifecycleTools(pm: ProcessManager, logger: winston.Logge
     handler: async (args) => {
       try {
         const p = await pm.startProcess(args);
-        return { content: [{ type: 'text', text: `Started process ${p.id} (${p.name})` }] };
+        return { content: [
+          { type: 'text', text: `Started process ${p.id} (${p.name})` },
+          { type: 'text', text: JSON.stringify({ process: p }, null, 2) }
+        ] };
       } catch (error) {
         logger.error('Failed to start process:', error);
         return { content: [{ type: 'text', text: `Failed to start process: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
@@ -67,7 +70,10 @@ export function registerLifecycleTools(pm: ProcessManager, logger: winston.Logge
     handler: async (args) => {
       try {
         await pm.stopProcess(args.processId, args.force);
-        return { content: [{ type: 'text', text: `Stopped process ${args.processId}` }] };
+        return { content: [
+          { type: 'text', text: `Stopped process ${args.processId}` },
+          { type: 'text', text: JSON.stringify({ processId: args.processId, action: 'stopped' }) }
+        ] };
       } catch (error) {
         logger.error('Failed to stop process:', error);
         return { content: [{ type: 'text', text: `Failed to stop process: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
@@ -82,7 +88,10 @@ export function registerLifecycleTools(pm: ProcessManager, logger: winston.Logge
     handler: async (args) => {
       try {
         const p = await pm.restartProcess(args.processId, args.newConfig);
-        return { content: [{ type: 'text', text: `Restarted process ${p.id} (${p.name})` }] };
+        return { content: [
+          { type: 'text', text: `Restarted process ${p.id} (${p.name})` },
+          { type: 'text', text: JSON.stringify({ process: p }, null, 2) }
+        ] };
       } catch (error) {
         logger.error('Failed to restart process:', error);
         return { content: [{ type: 'text', text: `Failed to restart process: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
@@ -97,7 +106,10 @@ export function registerLifecycleTools(pm: ProcessManager, logger: winston.Logge
     handler: async (args) => {
       try {
         await pm.killProcess(args.processId);
-        return { content: [{ type: 'text', text: `Killed process ${args.processId}` }] };
+        return { content: [
+          { type: 'text', text: `Killed process ${args.processId}` },
+          { type: 'text', text: JSON.stringify({ processId: args.processId, action: 'killed' }) }
+        ] };
       } catch (error) {
         logger.error('Failed to kill process:', error);
         return { content: [{ type: 'text', text: `Failed to kill process: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
@@ -112,7 +124,10 @@ export function registerLifecycleTools(pm: ProcessManager, logger: winston.Logge
     handler: async (args) => {
       try {
         const res = pm.listProcesses(args);
-        return { content: [{ type: 'text', text: `Found ${res.length} processes` }] };
+        return { content: [
+          { type: 'text', text: `Found ${res.length} processes` },
+          { type: 'text', text: JSON.stringify({ processes: res }, null, 2) }
+        ] };
       } catch (error) {
         logger.error('Failed to list processes:', error);
         return { content: [{ type: 'text', text: `Failed to list processes: ${error instanceof Error ? error.message : String(error)}` }], isError: true };

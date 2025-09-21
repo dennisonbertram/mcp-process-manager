@@ -26,7 +26,10 @@ export function registerMonitoringTools(
         if (!p) throw new Error(`Process ${processId} not found`);
         const m = (await stats.getProcessStats(processId, 60000))[0];
         return {
-          content: [{ type: 'text', text: `Process ${p.name} (${p.id})\nStatus: ${p.status}\nPID: ${p.pid || 'N/A'}\nCPU: ${(m?.cpuUsage||0).toFixed(2)}%\nMemory: ${(((m?.memoryUsage||0)/1048576)).toFixed(2)} MB\nUptime: ${p.startedAt ? ((Date.now() - p.startedAt) / 1000 / 60).toFixed(1) + ' min' : 'N/A'}` }]
+          content: [
+            { type: 'text', text: `Process ${p.name} (${p.id})\nStatus: ${p.status}\nPID: ${p.pid || 'N/A'}\nCPU: ${(m?.cpuUsage||0).toFixed(2)}%\nMemory: ${(((m?.memoryUsage||0)/1048576)).toFixed(2)} MB\nUptime: ${p.startedAt ? ((Date.now() - p.startedAt) / 1000 / 60).toFixed(1) + ' min' : 'N/A'}` },
+            { type: 'text', text: JSON.stringify({ process: p, latestMetric: m || null }, null, 2) }
+          ]
         };
       } catch (error) {
         logger.error('Failed to get process info:', error);
@@ -46,7 +49,10 @@ export function registerMonitoringTools(
       try {
         const aggregated = await stats.getAggregatedStats(processId, duration || 3600000);
         return {
-          content: [{ type: 'text', text: `Process stats for ${processId}:\nAvg CPU: ${aggregated.avgCpu.toFixed(2)}%\nMax CPU: ${aggregated.maxCpu.toFixed(2)}%\nAvg Memory: ${(aggregated.avgMemory / 1024 / 1024).toFixed(2)} MB\nMax Memory: ${(aggregated.maxMemory / 1024 / 1024).toFixed(2)} MB\nSamples: ${aggregated.sampleCount}` }]
+          content: [
+            { type: 'text', text: `Process stats for ${processId}:\nAvg CPU: ${aggregated.avgCpu.toFixed(2)}%\nMax CPU: ${aggregated.maxCpu.toFixed(2)}%\nAvg Memory: ${(aggregated.avgMemory / 1024 / 1024).toFixed(2)} MB\nMax Memory: ${(aggregated.maxMemory / 1024 / 1024).toFixed(2)} MB\nSamples: ${aggregated.sampleCount}` },
+            { type: 'text', text: JSON.stringify({ processId, aggregated }, null, 2) }
+          ]
         };
       } catch (error) {
         logger.error('Failed to get process stats:', error);
@@ -66,7 +72,10 @@ export function registerMonitoringTools(
       try {
         const r = await health.checkProcessHealth(processId);
         return {
-          content: [{ type: 'text', text: `Health check for ${processId}: ${r.status}\n${r.message || ''}\nResponse time: ${r.responseTime || 'N/A'}ms` }]
+          content: [
+            { type: 'text', text: `Health check for ${processId}: ${r.status}\n${r.message || ''}\nResponse time: ${r.responseTime || 'N/A'}ms` },
+            { type: 'text', text: JSON.stringify({ result: r }, null, 2) }
+          ]
         };
       } catch (error) {
         logger.error('Failed to check process health:', error);
@@ -86,7 +95,10 @@ export function registerMonitoringTools(
       try {
         const s = await stats.getSystemStats();
         return {
-          content: [{ type: 'text', text: `System Stats:\nCPU: ${s.cpuUsage.toFixed(2)}%\nMemory: ${s.memoryUsage.toFixed(2)}%\nFree Memory: ${(s.memoryFree / 1024 / 1024 / 1024).toFixed(2)} GB\nTotal Memory: ${(s.memoryTotal / 1024 / 1024 / 1024).toFixed(2)} GB\nUptime: ${(s.uptime / 3600).toFixed(2)} hours` }]
+          content: [
+            { type: 'text', text: `System Stats:\nCPU: ${s.cpuUsage.toFixed(2)}%\nMemory: ${s.memoryUsage.toFixed(2)}%\nFree Memory: ${(s.memoryFree / 1024 / 1024 / 1024).toFixed(2)} GB\nTotal Memory: ${(s.memoryTotal / 1024 / 1024 / 1024).toFixed(2)} GB\nUptime: ${(s.uptime / 3600).toFixed(2)} hours` },
+            { type: 'text', text: JSON.stringify({ system: s }, null, 2) }
+          ]
         };
       } catch (error) {
         logger.error('Failed to get system stats:', error);
