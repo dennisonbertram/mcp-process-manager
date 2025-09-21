@@ -8,7 +8,7 @@ const StartDevStackSchema = z.object({
   group: z.string().default('dev')
 });
 
-export function registerDevStackTools(pm: ProcessManager, gm: GroupManager, logger: winston.Logger) {
+export function registerDevStackTools(_pm: ProcessManager, gm: GroupManager, _logger: winston.Logger) {
   registerTool({
     name: 'start_dev_stack',
     description: 'Start the development stack defined in the config (group name default: dev)',

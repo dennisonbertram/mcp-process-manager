@@ -44,7 +44,7 @@ const TEMPLATES = [
   }
 ];
 
-export function registerTemplateTools(logger: winston.Logger) {
+export function registerTemplateTools(_logger: winston.Logger) {
   registerTool({
     name: 'templates/list',
     description: 'List available process templates',

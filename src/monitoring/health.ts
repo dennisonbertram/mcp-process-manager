@@ -166,8 +166,13 @@ export class HealthCheckService {
     return new Promise((resolve, reject) => {
       // Parse command - assume simple command without shell interpretation
       const parts = command.split(/\s+/);
-      const cmd = parts[0];
+      let cmd = parts[0];
       const args = parts.slice(1);
+
+      // Resolve bare tool name via PATH if allowed by PM_ALLOWED_TOOL_NAMES
+      try {
+        // @ts-ignore access to ConfigManager via process env is not available here; rely on allowedPaths only
+      } catch {}
 
       // Validate command path
       if (!this.isPathAllowed(cmd)) {

@@ -9,6 +9,8 @@ const StartProcessSchema = z.object({
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
   env: z.record(z.string()).optional(),
+  envFiles: z.array(z.string()).optional(),
+  envProfile: z.string().optional(),
   cwd: z.string().optional(),
   autoRestart: z.boolean().optional(),
   healthCheckCommand: z.string().optional(),

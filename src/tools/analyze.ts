@@ -7,7 +7,7 @@ import { HealthCheckService } from '../monitoring/health.js';
 const AnalyzeLogsSchema = z.object({ processId: z.string().optional(), limit: z.number().min(10).max(5000).default(500) });
 const CheckHealthSummarySchema = z.object({});
 
-export function registerAnalysisTools(logs: LogManager, health: HealthCheckService, logger: winston.Logger) {
+export function registerAnalysisTools(logs: LogManager, health: HealthCheckService, _logger: winston.Logger) {
   registerTool({
     name: 'analyze_logs',
     description: 'Summarize recent logs and highlight potential issues',

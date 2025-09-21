@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  mcp-process-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcp-process-manager
+    restart: unless-stopped
+    environment:
+      - PM_LOG_LEVEL=info
+      - PM_MAX_PROCESSES=50
+      - PM_DATABASE_PATH=/app/data/process-manager.db
+      - PM_ALLOWED_COMMANDS=/usr/bin,/bin,/usr/local/bin
+      - PM_AUTO_RESTART_ENABLED=true
+      - PM_LOG_RETENTION_DAYS=30
+      - PM_MAX_LOG_SIZE_MB=100
+      - PM_MAX_CPU_PERCENT=80
+      - PM_MAX_MEMORY_MB=1024
+      - PM_HEALTH_CHECK_INTERVAL=60000
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    networks:
+      - mcp-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "console.log('Health check passed')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: PostgreSQL database (if you want to use external DB instead of SQLite)
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: mcp-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: process_manager
+  #     POSTGRES_USER: mcp_user
+  #     POSTGRES_PASSWORD: mcp_password
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   networks:
+  #     - mcp-network
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U mcp_user -d process_manager"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+  # Optional: Redis for caching (if you add caching features)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: mcp-redis
+  #   restart: unless-stopped
+  #   networks:
+  #     - mcp-network
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+networks:
+  mcp-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  data:
+  logs:

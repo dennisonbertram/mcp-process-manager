@@ -6,7 +6,7 @@ import { registerTool } from './registry.js';
 
 const AnalyzeProjectSchema = z.object({ path: z.string().optional() });
 
-export function registerAdvisorTools(logger: winston.Logger) {
+export function registerAdvisorTools(_logger: winston.Logger) {
   registerTool({
     name: 'advisor/analyze_project',
     description: 'Analyze the repository to suggest processes and groups (dry-run)',

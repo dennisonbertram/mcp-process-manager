@@ -5,7 +5,7 @@ import { readProcessesConfig } from '../config/loader.js';
 
 const ReadConfigSchema = z.object({ path: z.string().optional() });
 
-export function registerConfigTools(logger: winston.Logger) {
+export function registerConfigTools(_logger: winston.Logger) {
   registerTool({
     name: 'config/read',
     description: 'Read and validate processes.config.json from the current directory (or path)',
