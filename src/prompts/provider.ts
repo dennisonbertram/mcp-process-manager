@@ -1,18 +1,8 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import winston from 'winston';
-import { z } from 'zod';
+import { ListPromptsRequestSchema, GetPromptRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
-const PromptsListRequest = z.object({
-  method: z.literal('prompts/list')
-});
-
-const PromptsGetRequest = z.object({
-  method: z.literal('prompts/get'),
-  params: z.object({
-    name: z.string(),
-    arguments: z.record(z.any()).optional()
-  })
-});
+// Using official SDK schemas for prompts/list and prompts/get
 
 export class PromptProvider {
   private server: Server;
@@ -27,7 +17,7 @@ export class PromptProvider {
 
   private registerPrompts(): void {
     // Prompt list handler
-    this.server.setRequestHandler(PromptsListRequest, async () => {
+    this.server.setRequestHandler(ListPromptsRequestSchema, async () => {
       return {
         prompts: [
           {
@@ -84,7 +74,7 @@ export class PromptProvider {
     });
 
     // Prompt get handler
-    this.server.setRequestHandler(PromptsGetRequest, async (request) => {
+    this.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
       const name = request.params.name;
       const args = request.params.arguments || {};
 

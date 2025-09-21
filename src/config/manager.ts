@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 
 const ConfigSchema = z.object({
-  PM_DATABASE_PATH: z.string().default('./data/process-manager.db'),
+  PM_DATABASE_PATH: z.string().default(path.join(os.homedir(), '.mcp-process-manager', 'data', 'process-manager.db')),
   PM_LOG_RETENTION_DAYS: z.number().min(1).max(365).default(30),
   PM_MAX_PROCESSES: z.number().min(1).max(1000).default(50),
   PM_HEALTH_CHECK_INTERVAL: z.number().min(1000).default(60000),

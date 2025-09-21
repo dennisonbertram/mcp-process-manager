@@ -121,7 +121,6 @@ describe('Log Management Tools', () => {
     it('should filter logs by time range', async () => {
       const now = Date.now();
       const past = now - 10000;
-      const future = now + 10000;
 
       logManager.addLog({
         processId: 'test-1',
@@ -402,7 +401,7 @@ describe('Log Management Tools', () => {
     });
 
     it('should maintain log order', async () => {
-      const timestamps = [];
+      const timestamps: number[] = [];
       for (let i = 0; i < 5; i++) {
         const timestamp = Date.now() + (i * 100);
         timestamps.push(timestamp);

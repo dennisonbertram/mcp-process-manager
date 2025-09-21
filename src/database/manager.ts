@@ -114,6 +114,10 @@ export class DatabaseManager {
       WHERE id = @id
     `));
 
+    this.preparedStatements.set('getProcess', this.db.prepare(`
+      SELECT * FROM processes WHERE id = ?
+    `));
+
     // Log management statements
     this.preparedStatements.set('insertLog', this.db.prepare(`
       INSERT INTO logs (process_id, type, message, timestamp, level)

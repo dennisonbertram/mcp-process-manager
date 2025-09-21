@@ -2,7 +2,9 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import winston from 'winston';
 import dotenv from 'dotenv';
-import { z } from 'zod';
+import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import fs from 'node:fs';
+import path from 'node:path';
 import { DatabaseManager } from './database/manager.js';
 import { ConfigManager } from './config/manager.js';
 import { ProcessManager } from './process/manager.js';
@@ -18,17 +20,7 @@ import { PromptProvider } from './prompts/provider.js';
 
 dotenv.config();
 
-const ToolsListRequest = z.object({
-  method: z.literal('tools/list')
-});
-
-const ToolsCallRequest = z.object({
-  method: z.literal('tools/call'),
-  params: z.object({
-    name: z.string(),
-    arguments: z.record(z.any())
-  })
-});
+// Using official MCP schemas from SDK for handlers
 
 // Initialize logger (stderr only for MCP compliance)
 const logger = winston.createLogger({
@@ -51,6 +43,14 @@ async function main() {
 
     // Initialize database
     const dbPath = config.get('PM_DATABASE_PATH');
+
+    // Ensure database directory exists
+    const dbDir = path.dirname(dbPath);
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+      logger.info(`Created database directory: ${dbDir}`);
+    }
+
     const database = new DatabaseManager(dbPath, logger);
 
     // Initialize log manager
@@ -103,12 +103,12 @@ async function main() {
 
     new PromptProvider(server, logger);
 
-    // Set up tool handlers
-    server.setRequestHandler(ToolsListRequest, async () => {
+    // Set up tool handlers (use official schemas)
+    server.setRequestHandler(ListToolsRequestSchema, async () => {
       return { tools: getToolsList() };
     });
 
-    server.setRequestHandler(ToolsCallRequest, async (request) => {
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return await callTool(request.params.name, request.params.arguments);
     });
 

@@ -6,19 +6,10 @@ import { GroupManager } from '../groups/manager.js';
 import { StatsCollector } from '../monitoring/collector.js';
 import { HealthCheckService } from '../monitoring/health.js';
 import winston from 'winston';
-import { z } from 'zod';
+import { ListResourcesRequestSchema, ReadResourceRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { ProcessStatus, HealthStatus } from '../types/process.js';
 
-const ResourcesListRequest = z.object({
-  method: z.literal('resources/list')
-});
-
-const ResourcesReadRequest = z.object({
-  method: z.literal('resources/read'),
-  params: z.object({
-    uri: z.string()
-  })
-});
+// Using official SDK request schemas
 
 export class ResourceProvider {
   private server: Server;
@@ -54,7 +45,7 @@ export class ResourceProvider {
 
   private registerResources(): void {
     // Resource list handler
-    this.server.setRequestHandler(ResourcesListRequest, async () => {
+    this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
       return {
         resources: [
           {
@@ -98,7 +89,7 @@ export class ResourceProvider {
     });
 
     // Resource read handler
-    this.server.setRequestHandler(ResourcesReadRequest, async (request) => {
+    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
       const uri = request.params.uri;
 
       try {

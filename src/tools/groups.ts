@@ -27,6 +27,10 @@ const StopGroupSchema = z.object({
   force: z.boolean().optional()
 });
 
+const GetGroupStatusSchema = z.object({
+  groupId: z.string().min(1)
+});
+
 export function registerGroupTools(
   groupManager: GroupManager,
   logger: winston.Logger
@@ -140,6 +144,33 @@ export function registerGroupTools(
           content: [{
             type: 'text',
             text: `Failed to stop group: ${error instanceof Error ? error.message : String(error)}`
+          }],
+          isError: true
+        };
+      }
+    },
+  });
+
+  registerTool({
+    name: 'get_group_status',
+    description: 'Get the current status of a process group',
+    schema: GetGroupStatusSchema,
+    handler: async (args: any) => {
+      try {
+        const status = await groupManager.getGroupStatus(args.groupId);
+
+        return {
+          content: [{
+            type: 'text',
+            text: `Group ${args.groupId} status:\n${status.processes.length} processes\n${status.runningCount} running\n${status.stoppedCount} stopped\n${status.failedCount} failed`
+          }]
+        };
+      } catch (error) {
+        logger.error('Failed to get group status:', error);
+        return {
+          content: [{
+            type: 'text',
+            text: `Failed to get group status: ${error instanceof Error ? error.message : String(error)}`
           }],
           isError: true
         };

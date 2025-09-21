@@ -1,4 +1,4 @@
-import { ChildProcess, spawn, exec } from 'child_process';
+import { ChildProcess, spawn } from 'child_process';
 import { nanoid } from 'nanoid';
 import winston from 'winston';
 import { DatabaseManager } from '../database/manager.js';
@@ -260,11 +260,33 @@ export class ProcessManager extends EventEmitter {
     if (!info.healthCheckCommand) return;
 
     try {
+      const parts = info.healthCheckCommand.trim().split(/\s+/);
+      const cmd = parts[0];
+      const args = parts.slice(1);
+      if (!this.config.isCommandAllowed(cmd)) {
+        throw new Error(`Health check command not allowed: ${cmd}`);
+      }
       await new Promise<void>((resolve, reject) => {
-        exec(info.healthCheckCommand!, { timeout: 5000 }, (error) => {
-          if (error) reject(error);
-          else resolve();
+        const child = spawn(cmd, args, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, ...info.env },
         });
+        const to = setTimeout(() => {
+          child.kill();
+          reject(new Error('Health check timed out'));
+        }, 5000);
+        let out = 0, err = 0;
+        child.stdout?.on('data', (d: Buffer) => {
+          out += d.length; if (out > 1024 * 1024) { child.kill(); reject(new Error('Health check output too large')); }
+        });
+        child.stderr?.on('data', (d: Buffer) => {
+          err += d.length; if (err > 1024 * 1024) { child.kill(); reject(new Error('Health check error output too large')); }
+        });
+        child.on('close', (code) => {
+          clearTimeout(to);
+          code === 0 ? resolve() : reject(new Error(`Health check failed with code ${code}`));
+        });
+        child.on('error', reject);
       });
 
       managedProcess.healthStatus = HealthStatus.HEALTHY;
@@ -415,12 +437,19 @@ class ManagedProcess {
     this.info.pid = undefined;
 
     // Update database
-    this.database.getStatement('updateProcessStatus').run({
-      id: this.info.id,
-      status: this.status,
-      pid: null,
-      started_at: null
-    });
+    try {
+      this.database.getStatement('updateProcessStatus').run({
+        id: this.info.id,
+        status: this.status,
+        pid: null,
+        started_at: null
+      });
+    } catch (error) {
+      // Database might be closed during shutdown, silently ignore
+      if (!(error instanceof Error) || !error.message?.includes('database connection is not open')) {
+        this.logger.error('Failed to update process status on exit', error);
+      }
+    }
 
     // Log system message
     this.logMessage(

@@ -3,7 +3,7 @@ import osUtils from 'node-os-utils';
 import winston from 'winston';
 import { DatabaseManager } from '../database/manager.js';
 import { ProcessManager } from '../process/manager.js';
-import { ProcessMetrics } from '../types/process.js';
+import { ProcessMetrics, ProcessStatus } from '../types/process.js';
 import { EventEmitter } from 'events';
 
 export interface SystemStats {
@@ -65,7 +65,7 @@ export class StatsCollector extends EventEmitter {
 
     // Collect process stats
     const processes = this.processManager.listProcesses({
-      status: 'running' as any // TODO: Fix type
+      status: ProcessStatus.RUNNING
     });
 
     const metricsPromises = processes.map(async (process) => {

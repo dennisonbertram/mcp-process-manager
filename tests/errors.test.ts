@@ -144,8 +144,6 @@ describe('Error Tracking Tools', () => {
     });
 
     it('should filter errors by time range', async () => {
-      const now = Date.now();
-
       await errorManager.recordError('test-1', new Error('Old error'));
       await new Promise(resolve => setTimeout(resolve, 100)); // Longer delay
       const midTime = Date.now();
@@ -256,7 +254,6 @@ describe('Error Tracking Tools', () => {
       await errorManager.recordError('test-1', new Error('Old error'));
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      const midTime = Date.now();
       await errorManager.recordError('test-1', new Error('New error'));
 
       // Time window of 50ms should only include the new error

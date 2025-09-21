@@ -215,8 +215,19 @@ export class HealthCheckService {
 
   private async isPathAllowed(cmd: string): Promise<boolean> {
     try {
-      const resolvedPath = await realpath(cmd);
-      return this.allowedPaths.has(resolvedPath) || this.allowedPaths.size === 0; // Allow all if no restrictions
+      const resolvedCmd = await realpath(cmd);
+      if (this.allowedPaths.size === 0) return true;
+      for (const entry of this.allowedPaths) {
+        try {
+          const resolvedRoot = await realpath(entry);
+          if (resolvedCmd === resolvedRoot) return true;
+          const withSep = resolvedRoot.endsWith('/') ? resolvedRoot : resolvedRoot + '/';
+          if (resolvedCmd.startsWith(withSep)) return true;
+        } catch {
+          // ignore bad roots
+        }
+      }
+      return false;
     } catch {
       return false;
     }

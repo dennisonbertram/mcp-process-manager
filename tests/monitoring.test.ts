@@ -27,10 +27,12 @@ describe('Monitoring Tools', () => {
     healthService = new HealthCheckService(processManager, db, logger, config.get('PM_ALLOWED_COMMANDS'));
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     statsCollector.stopCollection();
     healthService.stopAllHealthChecks();
     processManager.shutdown();
+    // Wait for processes to fully exit
+    await new Promise(resolve => setTimeout(resolve, 200));
     db.close();
     delete process.env.PM_ALLOWED_COMMANDS;
   });

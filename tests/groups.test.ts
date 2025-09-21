@@ -20,8 +20,10 @@ describe('Process Group Tools', () => {
     groupManager = new GroupManager(db, processManager, logger);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     processManager.shutdown();
+    // Wait for processes to fully exit
+    await new Promise(resolve => setTimeout(resolve, 200));
     db.close();
   });
 

@@ -16,7 +16,7 @@ describe('ConfigManager', () => {
     const config = new ConfigManager();
     expect(config.get('PM_MAX_PROCESSES')).toBe(50);
     expect(config.get('PM_LOG_LEVEL')).toBe('info');
-    expect(config.get('PM_DATABASE_PATH')).toBe('./data/process-manager.db');
+    expect(config.get('PM_DATABASE_PATH')).toMatch(/\.mcp-process-manager\/data\/process-manager\.db$/);
   });
 
   it('should load environment variables', () => {
