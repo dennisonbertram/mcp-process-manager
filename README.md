@@ -187,6 +187,29 @@ Cursor settings.json example:
 }
 ```
 
+PWD-only and system tools:
+- To keep PWD-only but still call system binaries, wrap them in repo scripts.
+
+Example wrapper (PWD-only):
+```bash
+mkdir -p scripts
+cat > scripts/ls.sh <<'EOF'
+#!/usr/bin/env bash
+/bin/ls "$@"
+EOF
+chmod +x scripts/ls.sh
+```
+
+Then call:
+```json
+{
+  "name": "start_process",
+  "arguments": { "name": "ls", "command": "./scripts/ls.sh", "args": ["-la"] }
+}
+```
+
+If you need direct access, add system dirs: `PM_ALLOWED_COMMANDS="pwd,/bin,/usr/bin,/usr/local/bin"`. 
+
 ## 📖 Usage
 
 ### Process Lifecycle Management
