@@ -60,7 +60,30 @@ export function registerLifecycleTools(pm: ProcessManager, logger: winston.Logge
         ] };
       } catch (error) {
         logger.error('Failed to start process:', error);
-        return { content: [{ type: 'text', text: `Failed to start process: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+        const msg = error instanceof Error ? error.message : String(error);
+        const suggestions: any = [];
+        if (/Command not allowed/i.test(msg)) {
+          suggestions.push({
+            actionRequired: 'grant_permission',
+            envVars: {
+              PM_ALLOWED_COMMANDS: 'pwd,/usr/bin,/usr/local/bin',
+              PM_ALLOWED_TOOL_NAMES: 'pnpm,npm,yarn,node,tsx,next,vite'
+            },
+            how: 'Add these to server env and restart, or wrap the command in a repo script under PWD.'
+          });
+        } else if (/Maximum process limit reached/i.test(msg)) {
+          suggestions.push({
+            actionRequired: 'increase_limit',
+            envVars: { PM_MAX_PROCESSES: '100' }
+          });
+        }
+        return {
+          content: [
+            { type: 'text', text: `Failed to start process: ${msg}` },
+            { type: 'text', text: JSON.stringify({ suggestions }, null, 2) }
+          ],
+          isError: true
+        };
       }
     },
   });

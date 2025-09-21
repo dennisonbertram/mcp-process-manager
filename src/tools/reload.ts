@@ -19,7 +19,11 @@ export function registerReloadTools(pm: ProcessManager, gm: GroupManager, logger
     handler: async (args: any) => {
       const { config, issues } = readProcessesConfig(process.cwd(), args.path || 'processes.config.json');
       if (!config) {
-        return { content: [{ type: 'text', text: `Failed to load config: ${(issues||[]).join('; ')}` }], isError: true };
+        const details = (issues||[]).join('; ');
+        return { content: [
+          { type: 'text', text: `Failed to load config: ${details}` },
+          { type: 'text', text: JSON.stringify({ suggestions: [{ actionRequired: 'fix_config', hint: 'Ensure processes.config.json is valid JSON and matches schema.' }] }, null, 2) }
+        ], isError: true };
       }
 
       const actions: any[] = [];

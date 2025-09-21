@@ -56,7 +56,7 @@ export class ProcessManager extends EventEmitter {
       if (viaTool) resolvedCommand = viaTool;
     }
     if (!this.config.isCommandAllowed(resolvedCommand)) {
-      throw new Error(`Command not allowed: ${config.command}`);
+      throw new Error(`Command not allowed: ${config.command}. To grant permission, update PM_ALLOWED_COMMANDS (e.g., 'pwd,/usr/bin') and optionally PM_ALLOWED_TOOL_NAMES (e.g., 'pnpm,node'), then restart the server.`);
     }
 
     // Check max processes limit
