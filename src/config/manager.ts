@@ -44,11 +44,33 @@ export class ConfigManager {
       }
     }
 
-    return ConfigSchema.parse(envConfig);
+    const parsed = ConfigSchema.parse(envConfig);
+
+    // Expand and clean allowed command paths
+    const expandEntry = (p: string): string => {
+      const trimmed = p.trim();
+      if (!trimmed) return '';
+      if (trimmed === 'pwd' || trimmed === '$PWD' || trimmed === '${PWD}' || trimmed === '{PWD}') {
+        return process.cwd();
+      }
+      if (trimmed.startsWith('~')) {
+        return path.join(os.homedir(), trimmed.slice(1));
+      }
+      return trimmed;
+    };
+
+    const cleaned = (parsed.PM_ALLOWED_COMMANDS || [])
+      .map(expandEntry)
+      .filter((p) => p.length > 0);
+
+    parsed.PM_ALLOWED_COMMANDS = cleaned;
+
+    return parsed;
   }
 
   private validateCommandPaths(): void {
     const allowedPaths = this.config.PM_ALLOWED_COMMANDS;
+    if (allowedPaths.length === 0) return; // Empty means allow all
     for (const cmdPath of allowedPaths) {
       if (!path.isAbsolute(cmdPath)) {
         throw new Error(`Invalid command path: ${cmdPath} must be absolute`);
@@ -62,6 +84,7 @@ export class ConfigManager {
 
   isCommandAllowed(command: string): boolean {
     try {
+      if (this.config.PM_ALLOWED_COMMANDS.length === 0) return true; // Empty means allow all
       const realCmd = fs.realpathSync(command);
       return this.config.PM_ALLOWED_COMMANDS.some((root) => {
         const realRoot = fs.realpathSync(root);
