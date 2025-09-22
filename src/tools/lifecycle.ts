@@ -54,9 +54,14 @@ export function registerLifecycleTools(pm: ProcessManager, logger: winston.Logge
     handler: async (args) => {
       try {
         const p = await pm.startProcess(args);
+        let dashUrl: string | null = null;
+        try {
+          const { ensureDashboardUrl } = await import('../dashboard/runtime.js');
+          dashUrl = await ensureDashboardUrl();
+        } catch {}
         return { content: [
-          { type: 'text', text: `Started process ${p.id} (${p.name})` },
-          { type: 'text', text: JSON.stringify({ process: p }, null, 2) }
+          { type: 'text', text: `Started process ${p.id} (${p.name})${dashUrl ? ` — Monitor: ${dashUrl}` : ''}` },
+          { type: 'text', text: JSON.stringify({ process: p, dashboard: dashUrl }, null, 2) }
         ] };
       } catch (error) {
         logger.error('Failed to start process:', error);

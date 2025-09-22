@@ -62,6 +62,12 @@ async function main() {
     // Initialize process manager
     const processManager = new ProcessManager(database, logger, config, logManager);
 
+    // Initialize dashboard runtime (lazy start on first process)
+    try {
+      const { initDashboard } = await import('./dashboard/runtime.js');
+      initDashboard(processManager, logManager, logger);
+    } catch {}
+
     // Initialize group manager
     const groupManager = new GroupManager(database, processManager, logger);
 
