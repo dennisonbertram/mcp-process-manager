@@ -95,3 +95,43 @@ Then just say "start dev" and it knows what to do.
 ## License
 
 MIT
+
+## Advanced Usage
+
+- Templates & Advisor: Use presets or get suggestions.
+  - templates/list: discover templates by category
+  - templates/apply: generate a ProcessesConfig (dry-run)
+  - advisor/analyze_project: scan repo and suggest processes/groups
+  - start_dev_stack: auto-loads processes.config.json if group not found, then starts it
+
+- Config Files: Optional, for one-command dev stacks.
+  - File: processes.config.json
+  - Schema (minimal):
+    {
+      "processes": {
+        "frontend": { "command": "pnpm", "args": ["dev"], "cwd": "pwd" },
+        "backend": { "command": "pnpm", "args": ["worker:dev"], "cwd": "pwd" }
+      },
+      "groups": { "dev": ["backend","frontend"] }
+    }
+  - Validate: config/read
+  - Preview/apply: config/reload with { "dryRun": true|false, "group": "dev" }
+
+- Monitoring & Health:
+  - get_system_stats: CPU/memory snapshot
+  - get_process_info: status + latest metric
+  - get_process_stats: aggregates over duration
+  - check_process_health: run health checks
+  - analyze_logs: summarize errors/warnings
+  - check_health_summary: overall health status
+
+- Parameter Hints (start_process):
+  - { "name":"api", "command":"pnpm", "args":["dev"], "cwd":"pwd", "env":{ "PORT":"3000" }, "envFiles":[".env",".env.local"], "envProfile":"development" }
+  - args is an array; env is an object; cwd supports "pwd"
+
+- Permissions & Safety:
+  - Default PM_ALLOWED_COMMANDS includes: pwd,/bin,/usr/bin,/usr/local/bin,/opt/homebrew/bin
+  - Default PM_ALLOWED_TOOL_NAMES includes: node,npm,pnpm,yarn,npx,tsc,tsx,ts-node,next,vite,vitest,git,ls,bash,sh,curl,bun
+  - Dangerous commands blocked by default: kill, killall, pkill, shutdown, reboot, halt, poweroff, launchctl, scutil
+  - Tools stop/kill only managed child processes (not your shell or Cursor)
+  - To widen allowlist, add names to PM_ALLOWED_TOOL_NAMES or directories to PM_ALLOWED_COMMANDS
