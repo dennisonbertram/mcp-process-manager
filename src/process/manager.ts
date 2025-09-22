@@ -55,6 +55,9 @@ export class ProcessManager extends EventEmitter {
       const viaTool = this.config.resolveAllowedTool(resolvedCommand);
       if (viaTool) resolvedCommand = viaTool;
     }
+    if (this.config.isDangerousCommand(resolvedCommand)) {
+      throw new Error(`Dangerous command blocked: ${config.command}. To override, remove it from PM_DANGEROUS_COMMANDS_DENYLIST (expert only).`);
+    }
     if (!this.config.isCommandAllowed(resolvedCommand)) {
       throw new Error(`Command not allowed: ${config.command}. To grant permission, update PM_ALLOWED_COMMANDS (e.g., 'pwd,/usr/bin') and optionally PM_ALLOWED_TOOL_NAMES (e.g., 'pnpm,node'), then restart the server.`);
     }
@@ -283,6 +286,9 @@ export class ProcessManager extends EventEmitter {
       if (!cmd.includes('/') && !cmd.includes('\\')) {
         const viaTool = this.config.resolveAllowedTool(cmd);
         if (viaTool) cmd = viaTool;
+      }
+      if (this.config.isDangerousCommand(cmd)) {
+        throw new Error(`Dangerous health check command blocked: ${cmd}`);
       }
       if (!this.config.isCommandAllowed(cmd)) {
         throw new Error(`Health check command not allowed: ${cmd}`);

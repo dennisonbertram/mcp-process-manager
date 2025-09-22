@@ -160,6 +160,8 @@ const group = await mcp.callTool('create_group', {
 | `PM_MAX_CPU_PERCENT` | `80` | CPU usage threshold for alerts |
 | `PM_MAX_MEMORY_MB` | `1024` | Memory usage threshold for alerts |
 | `PM_HEALTH_CHECK_INTERVAL` | `60000` | Health check interval in milliseconds |
+| `PM_ALLOWED_TOOL_NAMES` |  | Comma-separated bare tool names allowed via PATH (e.g., `pnpm,node`) |
+| `PM_DANGEROUS_COMMANDS_DENYLIST` | `kill,killall,pkill,shutdown,reboot,halt,poweroff,launchctl,scutil` | Commands blocked even if otherwise allowed |
 
 ### Allowed Commands (Security)
 

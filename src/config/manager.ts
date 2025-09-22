@@ -12,6 +12,7 @@ const ConfigSchema = z.object({
   PM_LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
   PM_ALLOWED_COMMANDS: z.string().transform(val => val.split(',')).default('/usr/bin,/usr/local/bin'),
   PM_ALLOWED_TOOL_NAMES: z.string().transform(val => val.split(',')).default(''),
+  PM_DANGEROUS_COMMANDS_DENYLIST: z.string().transform(val => val.split(',')).default('kill,killall,pkill,shutdown,reboot,halt,poweroff,launchctl,scutil'),
   PM_MAX_LOG_SIZE_MB: z.number().min(1).max(10000).default(100),
   PM_MAX_CPU_PERCENT: z.number().min(1).max(100).default(80),
   PM_MAX_MEMORY_MB: z.number().min(1).max(32000).default(1024),
@@ -99,6 +100,11 @@ export class ConfigManager {
 
   // Resolve bare tool name via PATH if allowed in PM_ALLOWED_TOOL_NAMES; returns absolute path or null
   resolveAllowedTool(command: string): string | null {
+    // Denylist guard for dangerous commands
+    const baseName = command.split(/[\\/]/).pop() || command;
+    const deny = (this.config.PM_DANGEROUS_COMMANDS_DENYLIST || []).map((s) => s.trim()).filter(Boolean);
+    if (deny.includes(baseName)) return null;
+
     // If already absolute or relative path, return as-is
     if (command.includes('/') || command.includes('\\')) return command;
     const names = (this.config.PM_ALLOWED_TOOL_NAMES || []).map((s) => s.trim()).filter(Boolean);
@@ -109,12 +115,22 @@ export class ConfigManager {
     for (const dir of pathEnv.split(sep)) {
       try {
         const candidate = fs.realpathSync(path.join(dir, command));
+        // Denylist applies to resolved path basename too
+        const candBase = path.basename(candidate);
+        if (deny.includes(candBase)) continue;
         if (fs.existsSync(candidate) && this.isCommandAllowed(candidate)) {
           return candidate;
         }
       } catch { /* ignore */ }
     }
     return null;
+  }
+
+  // Explicit dangerous command check
+  isDangerousCommand(command: string): boolean {
+    const base = command.split(/[\\/]/).pop() || command;
+    const deny = (this.config.PM_DANGEROUS_COMMANDS_DENYLIST || []).map((s) => s.trim()).filter(Boolean);
+    return deny.includes(base);
   }
 
   getAll(): Config {
