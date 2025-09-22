@@ -1,11 +1,11 @@
 # MCP Process Manager
 
-Run and manage processes from your current directory. Built for the Model Context Protocol.
+Dead simple process management. Start, stop, and monitor processes in your current directory.
 
-## Quick Install
+## Install
 
 ```bash
-npm install -g @local/process-manager-mcp
+npm install -g mcp-process-manager
 ```
 
 ## Add to Claude Desktop
@@ -15,67 +15,74 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "process-manager": {
+    "pm": {
       "command": "npx",
-      "args": ["-y", "@local/process-manager-mcp"],
-      "env": {
-        "PM_ALLOWED_COMMANDS": "pwd"
-      }
+      "args": ["-y", "mcp-process-manager"]
     }
   }
 }
 ```
 
-This configuration only allows running commands from your current directory (`pwd`).
+That's it. Works in whatever directory you're in.
 
-## What It Does
+## What You Can Say
 
-Once configured, Claude can:
-- ✅ Start your dev servers: "Start my Next.js app"
-- ✅ Run build scripts: "Build the project"
-- ✅ Manage multiple processes: "Start both frontend and backend"
-- ✅ Monitor running processes: "What's currently running?"
-- ✅ Check logs: "Show me the server logs"
-- ✅ Stop processes: "Stop the dev server"
+**Start something:**
+- "Run npm dev"
+- "Start the server"
+- "Run the build script"
 
-## Security First
+**Check status:**
+- "What's running?"
+- "Show me the logs"
 
-By default, this server only runs commands from your current working directory:
-- `PM_ALLOWED_COMMANDS="pwd"` - Only current directory (safest)
-- `PM_ALLOWED_COMMANDS="pwd,/usr/bin,/usr/local/bin"` - Current directory + system commands
-- See [Configuration Guide](docs/CONFIGURATION.md) for more options
+**Stop something:**
+- "Stop the server"
+- "Kill all processes"
 
-## Example Usage
+## Just 5 Tools
+
+1. **start** - Start a process
+2. **stop** - Stop a process
+3. **list** - See what's running
+4. **logs** - View output
+5. **restart** - Restart a process
+
+No complex configuration. No profiles. It just works.
+
+## Examples
 
 **You:** "Start my dev server"
-**Claude:** "I'll start your development server for you."
-*[Runs `npm run dev` from your current directory]*
-**Claude:** "Your dev server is now running on http://localhost:3000"
+**Claude:** *Runs `npm run dev`*
 
 **You:** "What's running?"
-**Claude:** "You have 1 process running:
-- nextjs-app: Running for 2 minutes, healthy"
+**Claude:** "1 process running: npm (2 minutes)"
 
-## Documentation
+**You:** "Show me the logs"
+**Claude:** *Shows recent output*
 
-- [Configuration Guide](docs/CONFIGURATION.md) - Environment variables, security settings
-- [API Reference](docs/API.md) - All available tools and commands
-- [LLM Usage Guide](docs/LLM_USAGE.md) - How LLMs interact with the server
-- [Development](docs/DEVELOPMENT.md) - Building from source, contributing
+**You:** "Stop it"
+**Claude:** "Process stopped"
 
-## Troubleshooting
+## Auto-Detection
 
-**"Command not allowed" error?**
-The process manager is restricted to your current directory by default. To run system commands, update `PM_ALLOWED_COMMANDS` in your config.
+If you have `processes.json` in your directory:
 
-**Need to run npm/yarn/pnpm directly?**
-Add them to allowed tools:
 ```json
-"env": {
-  "PM_ALLOWED_COMMANDS": "pwd",
-  "PM_ALLOWED_TOOL_NAMES": "npm,yarn,pnpm"
+{
+  "dev": "npm run dev",
+  "build": "npm run build",
+  "test": "npm test"
 }
 ```
+
+Then just say "start dev" and it knows what to do.
+
+## Safety
+
+- Can only run commands in current directory
+- Can't run system-level commands (shutdown, reboot, etc.)
+- All processes are tracked and cleanable
 
 ## License
 
