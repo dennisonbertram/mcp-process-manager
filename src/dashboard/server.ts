@@ -7,7 +7,9 @@
 // - Intended as a lightweight UI until a full React app is added
 
 import http from 'node:http';
-import { parse as parseUrl } from 'node:url';
+import fs from 'node:fs';
+import path from 'node:path';
+import { parse as parseUrl, fileURLToPath } from 'node:url';
 import winston from 'winston';
 import { ProcessManager } from '../process/manager.js';
 import { LogManager, LogEntry } from '../logs/manager.js';
@@ -83,8 +85,35 @@ export class DashboardServer {
       return;
     }
 
+    // Serve built React assets if present
+    if (this.serveStatic(pathname, res)) return;
+
     res.statusCode = 404;
     res.end('Not found');
+  }
+
+  private serveStatic(pathname: string, res: http.ServerResponse): boolean {
+    const rootDir = path.resolve(process.cwd(), 'apps/log-dashboard/dist');
+    const safePath = pathname.replace(/\.\.+/g, '.');
+    const filePath = path.join(rootDir, safePath.startsWith('/') ? safePath.slice(1) : safePath);
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      const ext = path.extname(filePath).toLowerCase();
+      const ctype = ext === '.js' ? 'application/javascript'
+        : ext === '.css' ? 'text/css'
+        : ext === '.svg' ? 'image/svg+xml'
+        : ext === '.ico' ? 'image/x-icon'
+        : 'application/octet-stream';
+      try {
+        const buf = fs.readFileSync(filePath);
+        res.statusCode = 200;
+        res.setHeader('Content-Type', ctype);
+        res.end(buf);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
   }
 
   private handleIndex(res: http.ServerResponse) {
