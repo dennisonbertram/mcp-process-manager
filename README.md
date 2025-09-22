@@ -8,22 +8,30 @@ Dead simple process management. Start, stop, and monitor processes in your curre
 npm install -g mcp-process-manager
 ```
 
-## Add to Claude Desktop
+## Cursor Setup
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Add to your Cursor `settings.json`:
 
 ```json
 {
   "mcpServers": {
-    "pm": {
-      "command": "npx",
-      "args": ["-y", "mcp-process-manager"]
+    "mcp-process-manager": {
+      "command": "node",
+      "args": ["/Users/dennisonbertram/Develop/ModelContextProtocol/mcp-process-manager/dist/index.js"],
+      "env": {
+        "PM_ALLOWED_COMMANDS": "pwd,/bin,/usr/bin,/usr/local/bin,/opt/homebrew/bin",
+        "PM_ALLOWED_TOOL_NAMES": "node,npm,pnpm,yarn,npx,tsc,tsx,ts-node,next,vite,vitest,git,ls,bash,sh,curl,bun",
+        "PM_LOG_LEVEL": "info"
+      }
     }
   }
 }
 ```
 
-That's it. Works in whatever directory you're in.
+Notes:
+- Allows anything in the workspace plus common system bins.
+- Dangerous system killers (kill/killall/pkill/etc.) are blocked by default.
+- cwd defaults to the current project; you can pass `cwd: "pwd"` explicitly with start_process.
 
 ## What You Can Say
 
