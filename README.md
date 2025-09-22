@@ -79,21 +79,95 @@ npm run build
 npm test
 ```
 
-## 🍳 Quick Recipes for LLMs
+## 🤖 Quick Recipes for LLMs (Claude, GPT, etc.)
 
-- Create a dev config from a template (dry-run):
-  - call `templates/apply` with `{ "name": "fullstack-dev" }` → save JSON to `processes.config.json`
-- Validate the config:
-  - call `config/read` (no args) → check `issues` array is empty
-- Preview what will happen:
-  - call `config/reload` with `{ "dryRun": true, "group": "dev" }`
-- Start the stack:
-  - call `config/reload` with `{ "dryRun": false, "group": "dev" }`
-- Inspect health and logs:
-  - call `check_health_summary` (no args)
-  - call `analyze_logs` with `{ "limit": 500 }`
-- Add a single process with env files:
-  - call `start_process` with `{ "name":"api", "command":"pnpm", "args":["dev"], "envFiles":[".env.local",".env"], "cwd":"pwd" }`
+This section provides copy-paste tool call patterns that LLMs can use when interacting with this MCP server. When you ask an LLM to "start my development server" or "check what's running", it uses these patterns to execute the appropriate MCP tools.
+
+### How LLMs Use This Server
+
+When an LLM has this MCP server connected, it can call tools to manage processes on your behalf. Here's what happens:
+
+1. **You ask:** "Start my Next.js dev server"
+2. **LLM translates to:** `mcp.callTool('start_process', { name: 'nextjs', command: 'npm', args: ['run', 'dev'], cwd: 'pwd' })`
+3. **Server executes:** Starts the process and returns the process ID
+4. **LLM responds:** "I've started your Next.js dev server (process ID: abc123)"
+
+### Common LLM Tool Call Patterns
+
+#### Starting a Development Stack
+```javascript
+// LLM Recipe: Start a full development environment
+// Step 1: Apply a template to get configuration
+await mcp.callTool('templates/apply', { name: 'fullstack-dev' })
+// → Returns a config JSON that the LLM saves to processes.config.json
+
+// Step 2: Validate the configuration
+await mcp.callTool('config/read')
+// → LLM checks if issues array is empty
+
+// Step 3: Preview what will happen (dry run)
+await mcp.callTool('config/reload', { dryRun: true, group: 'dev' })
+// → Shows what processes would be started/stopped
+
+// Step 4: Actually start the processes
+await mcp.callTool('config/reload', { dryRun: false, group: 'dev' })
+// → Starts all processes in the 'dev' group
+```
+
+#### Managing Individual Processes
+```javascript
+// Start a single process with environment files
+await mcp.callTool('start_process', {
+  name: 'api-server',
+  command: 'pnpm',
+  args: ['dev'],
+  envFiles: ['.env.local', '.env'],
+  cwd: 'pwd'  // Uses current working directory
+})
+
+// Check health of all processes
+await mcp.callTool('check_health_summary')
+
+// Analyze recent logs for errors
+await mcp.callTool('analyze_logs', { limit: 500 })
+
+// Stop a specific process
+await mcp.callTool('stop_process', { processId: 'api-server-id' })
+```
+
+### Real Example: LLM Starting a Next.js App
+
+**User:** "Can you start my Next.js app and make sure it's running properly?"
+
+**LLM's internal tool calls:**
+```javascript
+// 1. First, check what's currently running
+await mcp.callTool('list_processes')
+
+// 2. Start the Next.js development server
+const result = await mcp.callTool('start_process', {
+  name: 'nextjs-app',
+  command: 'npm',
+  args: ['run', 'dev'],
+  cwd: 'pwd',
+  healthCheckCommand: 'curl -f http://localhost:3000',
+  autoRestart: true
+})
+
+// 3. Wait a moment then check health
+await new Promise(r => setTimeout(r, 3000))
+await mcp.callTool('check_process_health', {
+  processId: result.id
+})
+
+// 4. Get recent logs to confirm startup
+await mcp.callTool('get_logs', {
+  processId: result.id,
+  limit: 20
+})
+```
+
+**LLM's response to user:** "I've started your Next.js app. It's running on http://localhost:3000 and the health check confirms it's responding properly. The server started successfully with no errors in the logs."
 
 ## 🚀 Quick Start
 
