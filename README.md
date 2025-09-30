@@ -8,20 +8,23 @@ Dead simple process management. Start, stop, and monitor processes in your curre
 npm install -g mcp-process-manager
 ```
 
-## Cursor Setup
+## Opencode Setup
 
-Add to your Cursor `settings.json`:
+Add to your Opencode MCP config (example at docs/opencode.mcp.json):
 
 ```json
 {
   "mcpServers": {
-    "mcp-process-manager": {
+    "process-manager": {
       "command": "node",
-      "args": ["/Users/dennisonbertram/Develop/ModelContextProtocol/mcp-process-manager/dist/index.js"],
+      "args": ["dist/index.js"],
+      "cwd": "/Users/dennisonbertram/Develop/ModelContextProtocol/mcp-process-manager",
       "env": {
-        "PM_ALLOWED_COMMANDS": "pwd,/bin,/usr/bin,/usr/local/bin,/opt/homebrew/bin",
-        "PM_ALLOWED_TOOL_NAMES": "node,npm,pnpm,yarn,npx,tsc,tsx,ts-node,next,vite,vitest,git,ls,bash,sh,curl,bun",
-        "PM_LOG_LEVEL": "info"
+        "PM_PROJECT_DIR": "/path/to/your/project",
+        "PM_SYSTEM_DIRS": "/usr/bin,/usr/local/bin",
+        "PM_DATABASE_PATH": "~/.mcp-process-manager/data/process-manager.db",
+        "PM_LOG_LEVEL": "info",
+        "MCP_PM_ACTION_LOG_FILE": ".mcp-actions.md"
       }
     }
   }

@@ -9,10 +9,10 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { parse as parseUrl, fileURLToPath } from 'node:url';
+import { parse as parseUrl } from 'node:url';
 import winston from 'winston';
 import { ProcessManager } from '../process/manager.js';
-import { LogManager, LogEntry } from '../logs/manager.js';
+import { LogManager } from '../logs/manager.js';
 
 export class DashboardServer {
   private server?: http.Server;
@@ -240,7 +240,7 @@ setInterval(fetchProcesses, 3000);
 
   private attachLogForwarder() {
     // Forward newLog events to any SSE clients subscribed for that process
-    this.logManager.on('newLog', (entry: LogEntry) => {
+    this.logManager.on('newLog', (entry: any) => {
       const set = this.streams.get(entry.processId);
       if (!set || set.size === 0) return;
       const line = `data: ${JSON.stringify(entry)}\n\n`;

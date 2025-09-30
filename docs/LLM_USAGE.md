@@ -251,3 +251,10 @@ Over time, AI assistants learn your project structure:
 4. **Remembers issues:** AI tracks common problems and solutions
 
 This means interactions get smoother over time as the AI learns your specific setup and preferences.
+
+## Action Log Review
+
+- Every tool call is logged to a Markdown file (default: `~/.mcp-process-manager/actions.md`).
+- If the output or error is longer than 1000 characters, the main log includes a clear pointer saying: "Output exceeds 1000 chars. See full content: <path>" (or for errors), where `<path>` is a separate Markdown file under `attachments/`.
+- When you see such a pointer, read that attachment path to view the entire output/error.
+- Sensitive fields in arguments are redacted by default (e.g., tokens, passwords).

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import { nanoid } from 'nanoid';
+import { logToolAction } from '../utils/actionLogger.js';
 
 interface Tool {
   name: string;
@@ -35,12 +37,45 @@ export async function callTool(name: string, args: any): Promise<{ content: Arra
     };
   }
 
+  const requestId = nanoid(8);
+  const timestamp = new Date().toISOString();
+
   try {
     const validatedArgs = tool.schema.parse(args);
-    return await tool.handler(validatedArgs);
+    const result = await tool.handler(validatedArgs);
+
+    // Concatenate text outputs for logging only (does not affect response)
+    const outputText = (result.content || [])
+      .filter(c => c && typeof c.text === 'string')
+      .map(c => c.text)
+      .join('\n\n');
+
+    // Log success
+    logToolAction({
+      requestId,
+      tool: name,
+      timestamp,
+      args: validatedArgs,
+      isError: !!result.isError,
+      outputText: outputText || undefined,
+    });
+
+    return result;
   } catch (error) {
+    // Log error – include stack if available
+    const errText = error instanceof Error ? `${error.message}\n\n${error.stack || ''}` : String(error);
+    logToolAction({
+      requestId,
+      tool: name,
+      timestamp,
+      args,
+      isError: true,
+      errorText: errText,
+    });
+
+    // Return standardized error without leaking internals in response
     return {
-      content: [{ type: 'text', text: `Invalid arguments for tool '${name}': ${error instanceof Error ? error.message : String(error)}` }],
+      content: [{ type: 'text', text: `Failed to execute tool '${name}': ${error instanceof Error ? error.message : String(error)}` }],
       isError: true
     };
   }

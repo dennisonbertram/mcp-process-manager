@@ -213,3 +213,17 @@ volumes:
 - Must be in the project root directory
 - Check JSON syntax is valid
 - Verify file permissions allow reading
+
+## Action Logging (Default: ON)
+
+Minimal, always-on Markdown logging records every tool call for LLM review.
+
+- File: `.mcp-actions.md` in the current working directory by default
+- Env override: `MCP_PM_ACTION_LOG_FILE=/absolute/path/to/actions.md`
+- Disable: `MCP_PM_ACTION_LOG_FILE=off`
+- Format: one append-only Markdown file; each entry includes timestamp, tool name, redacted args, and output/error summary
+- Large output/error (>1000 chars): full content saved to a separate Markdown file under `<log_dir>/attachments/`; the main log contains a pointer with instructions to read that file
+- Redaction: masks common secret keys (token, password, secret, apiKey, auth, bearer); values are truncated in the main log
+- Reliability: log writes never throw; on failure, a warning is emitted to stderr
+
+Rationale: a single append-only log is easiest for LLMs to grep and reason about across sessions.

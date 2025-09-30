@@ -4,7 +4,8 @@
   "description": "MCP server for process management and monitoring",
   "main": "dist/index.js",
   "bin": {
-    "mcp-process-manager": "dist/index.js"
+    "mcp-process-manager": "dist/index.js",
+    "mcp-actions-log": "dist/cli/actions-log.js"
   },
   "type": "module",
   "scripts": {
